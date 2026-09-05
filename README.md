@@ -9,7 +9,7 @@ and a replaceable desktop frontend. The MVP never touches real storage.
 On Windows with MinGW g++, build the executable from the repository root:
 
 ```powershell
-g++ -std=c++17 -municode -mwindows app/main.cpp ui/desktop_ui.cpp core/src/workflow.cpp reporting/report.cpp -Iui -Icore/include -Ireporting -o crypty.exe -lcomctl32
+g++ -std=c++17 -municode -mwindows app/main.cpp ui/desktop_ui.cpp core/src/workflow.cpp reporting/report.cpp crypty_res.o -Iui -Icore/include -Ireporting -o crypty.exe -lcomctl32
 ```
 
 Then run `crypty.exe`. The native demo is the primary MVP surface.
@@ -24,6 +24,9 @@ ctest --test-dir build -C Release --output-on-failure
 
 On Windows, CMake builds the native `crypty.exe`. On other platforms it builds
 the portable `crypty_core` library and leaves the UI adapter as the next step.
+
+Place your `crypty.ico` file at `resources/crypty.ico` before building the
+Windows target. It is used for the executable, window, and taskbar icon.
 
 ## Layout
 

@@ -17,7 +17,7 @@ if(BUILD_TESTING)
 endif()
 
 if(WIN32)
-	add_executable(crypty WIN32 app/main.cpp ui/desktop_ui.cpp)
+	add_executable(crypty WIN32 app/main.cpp ui/desktop_ui.cpp resources/crypty.rc)
 	target_include_directories(crypty PRIVATE ui)
 	target_link_libraries(crypty PRIVATE crypty_core comctl32)
 	target_compile_features(crypty PRIVATE cxx_std_17)

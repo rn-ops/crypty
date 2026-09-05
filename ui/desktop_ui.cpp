@@ -10,6 +10,8 @@
 #include "crypty/workflow.hpp"
 #include "report.hpp"
 
+#define IDI_CRYPTY 101
+
 namespace
 {
     // -------------------------------------------------------------------------
@@ -987,8 +989,8 @@ HFONT hFont_normal = CreateFont(
             label(
                 window,
                 L"TARGET VOLUME",
-                42, 120,
-                300, 40);
+                42, 110,
+                150, 60);
 
         apply_font(target_label, hFont_normal);
 
@@ -1364,16 +1366,18 @@ int initialize_ui()
     // Window class
     // -------------------------------------------------------------------------
 
-    WNDCLASSW klass{};
-
+    WNDCLASSEXW klass{};
+    klass.cbSize = sizeof(klass);
     klass.hInstance = module;
     klass.lpfnWndProc = proc;
     klass.lpszClassName = L"CryptyCrystalWorkspace";
     klass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    klass.hIcon = LoadIconW(module, MAKEINTRESOURCEW(IDI_CRYPTY));
+    klass.hIconSm = LoadIconW(module, MAKEINTRESOURCEW(IDI_CRYPTY));
     klass.hbrBackground = background_brush;
 
     const ATOM registered =
-        RegisterClassW(&klass);
+        RegisterClassExW(&klass);
 
     if (!registered &&
         GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
