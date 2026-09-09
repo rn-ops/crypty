@@ -143,6 +143,9 @@ class DevicesPage(QWidget):
 
     def _update_selected_device(self, device):
         self.main_window.set_active_device(device)
+        self._render_device(device)
+
+    def _render_device(self, device):
         self.device_name.setText(device["name"])
         self.device_status.setText(device["status"])
         for key, value_label in self.property_labels.items():
@@ -150,7 +153,7 @@ class DevicesPage(QWidget):
         self.analysis_status.setText("Read-only metadata inspection. Storage writes are disabled.")
 
     def refresh_device_context(self):
-        self._update_selected_device(self.main_window.device_manager.get_selected_device())
+        self._render_device(self.main_window.device_manager.get_selected_device())
 
     def _analyze_device(self):
         device = self.main_window.device_manager.get_selected_device()

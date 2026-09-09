@@ -11,6 +11,11 @@ add_library(crypty_core
 target_include_directories(crypty_core PUBLIC core/include reporting)
 target_compile_features(crypty_core PUBLIC cxx_std_17)
 
+add_library(crypty_native SHARED core/src/native_bridge.cpp)
+target_link_libraries(crypty_native PRIVATE crypty_core)
+target_include_directories(crypty_native PRIVATE core/include)
+target_compile_features(crypty_native PRIVATE cxx_std_17)
+
 if(BUILD_TESTING)
 	add_executable(crypty_workflow_test tests/workflow_test.cpp)
 	target_link_libraries(crypty_workflow_test PRIVATE crypty_core)

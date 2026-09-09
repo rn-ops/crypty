@@ -33,7 +33,23 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 The CMake build compiles the portable `crypty_core` library and exposes a
-`crypty_ui` target that launches the Python Qt application.
+`crypty_native` library for the Python UI plus a `crypty_ui` target that
+launches the Python Qt application. Build `crypty_native` before starting the
+UI.
+
+For a MinGW build, place any required runtime DLLs beside `crypty_native.dll`
+before packaging. The PyInstaller spec automatically includes
+`libwinpthread-1.dll` when it is present.
+
+With MinGW installed, build the native bridge and package the app with:
+
+```powershell
+py -3 build_native.py
+py -3 -m PyInstaller --clean --noconfirm Crypty.spec
+```
+
+Or use `make package`. The spec stops with a clear error instead of producing
+an executable without the native engine.
 
 ## Layout
 

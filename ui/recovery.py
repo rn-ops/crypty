@@ -14,9 +14,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crypty.data.demo_data import RECOVERY_RESULTS
-
-
 class RecoveryPage(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -26,7 +23,9 @@ class RecoveryPage(QWidget):
     def refresh_device_context(self):
         device = self.main_window.device_manager.get_selected_device()
         self.source_value.setText(f"{device['name']}\n{device['filesystem']}\n{device['capacity']}")
+        self.results = self.main_window.backend.recovery_entries(device)
         summary = self.main_window.backend.recover_files(device)
+        self._populate_table(self.results)
         self.summary_values[0].setText(f"Files Found: {summary['files_found']}")
         self.summary_values[1].setText(f"Recoverable: {summary['recoverable']}")
         self.summary_values[2].setText(f"Needs Review: {summary['needs_review']}")
@@ -86,7 +85,8 @@ class RecoveryPage(QWidget):
         results_layout.setSpacing(20)
 
         left_results = QVBoxLayout()
-        self.table = QTableWidget(len(RECOVERY_RESULTS), 6)
+        self.results = []
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(["FILE", "TYPE", "SIZE", "METHOD", "CONFIDENCE", "STATUS"])
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -98,7 +98,7 @@ class RecoveryPage(QWidget):
         self.table.setColumnWidth(3, 120)
         self.table.setColumnWidth(4, 110)
         self.table.setColumnWidth(5, 100)
-        self._populate_table(RECOVERY_RESULTS)
+        self._populate_table(self.results)
         left_results.addWidget(self.table)
 
         summary = QFrame()
@@ -138,11 +138,11 @@ class RecoveryPage(QWidget):
 
     def _apply_filter(self, value):
         if value == "High Confidence":
-            filtered = [item for item in RECOVERY_RESULTS if item["confidence"] >= 90]
+            filtered = [item for item in self.results if item["confidence"] >= 90]
         elif value == "Needs Review":
-            filtered = [item for item in RECOVERY_RESULTS if item["status"] in {"Review", "Uncertain"}]
+            filtered = [item for item in self.results if item["status"] in {"Review", "Uncertain"}]
         else:
-            filtered = RECOVERY_RESULTS
+            filtered = self.results
         self._populate_table(filtered)
 
     def _run_scan(self):

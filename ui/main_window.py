@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crypty.core.backend import SimulatedBackend
+from crypty.core.native_backend import NativeBackend
 from crypty.core.device_manager import DeviceManager
 from crypty.core.recovery_engine import RecoveryEngine
 from crypty.core.sanitization_engine import SanitizationEngine
@@ -33,7 +33,7 @@ class CryptyMainWindow(QMainWindow):
         self.setMinimumSize(1200, 760)
         self.setStyleSheet(APP_STYLESHEET)
 
-        self.backend = SimulatedBackend()
+        self.backend = NativeBackend()
         self.device_manager = DeviceManager(self.backend)
         self.recovery_engine = RecoveryEngine(self.backend)
         self.sanitization_engine = SanitizationEngine(self.backend)

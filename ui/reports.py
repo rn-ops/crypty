@@ -13,7 +13,6 @@ from PySide6.QtCore import Qt
 
 from crypty.data.demo_data import REPORT_SUMMARY
 
-
 class ReportsPage(QWidget):
     def __init__(self, main_window, audit_only=False):
         super().__init__()
@@ -30,6 +29,9 @@ class ReportsPage(QWidget):
             self._build_audit_log(layout)
             return
 
+        device = self.main_window.device_manager.get_selected_device()
+        recovery = self.main_window.backend.recover_files(device)
+
         title = QLabel("Investigation Report")
         title.setFixedHeight(24)
         title.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
@@ -45,10 +47,10 @@ class ReportsPage(QWidget):
         fields = [
             ("CASE", REPORT_SUMMARY["case_id"]),
             ("OPERATOR", REPORT_SUMMARY["operator"]),
-            ("DEVICE", REPORT_SUMMARY["device"]),
-            ("OPERATION", REPORT_SUMMARY["operation"]),
-            ("START", REPORT_SUMMARY["start_time"]),
-            ("STATUS", REPORT_SUMMARY["status"]),
+            ("DEVICE", device["name"]),
+            ("OPERATION", "Recovery Analysis"),
+            ("START", "Current session"),
+            ("STATUS", recovery["integrity"]),
         ]
 
         for label, value in fields:
@@ -67,9 +69,12 @@ class ReportsPage(QWidget):
         stats_layout = QVBoxLayout(stats)
         stats_layout.setContentsMargins(18, 16, 18, 16)
         stats_layout.setSpacing(12)
-        stats_layout.addWidget(QLabel("RECOVERY RESULTS\n127 files identified\n94 high-confidence results"))
-        stats_layout.addWidget(QLabel("INTEGRITY\nSHA-256 records generated"))
-        stats_layout.addWidget(QLabel("AUDIT\n12 events recorded"))
+        stats_layout.addWidget(QLabel(
+            f"RECOVERY RESULTS\n{recovery['files_found']} files identified\n"
+            f"{recovery['recoverable']} high-confidence results"
+        ))
+        stats_layout.addWidget(QLabel(f"INTEGRITY\n{recovery['integrity']}"))
+        stats_layout.addWidget(QLabel(f"AUDIT\n{len(self.main_window.backend.audit_events())} events recorded"))
         report_columns = QHBoxLayout()
         report_columns.setSpacing(16)
         report_columns.addWidget(summary, 3)
@@ -105,11 +110,9 @@ class ReportsPage(QWidget):
         log_layout.setContentsMargins(18, 16, 18, 16)
         log_layout.setSpacing(12)
 
-        from crypty.data.demo_data import AUDIT_LOG
-
-        for event in AUDIT_LOG:
+        for event in self.main_window.backend.audit_events():
             line = QLabel(
-                f"{event['timestamp']}\n{event['action']}\n{event['target']}\n{event['status']}\nOperator: {event['operator']}"
+                f"{event['action']}\n{event['message']}"
             )
             line.setStyleSheet("font-family: 'Consolas'; font-size: 12px; line-height: 1.8; border-bottom: 1px solid #2b363d; padding-bottom: 6px;")
             log_layout.addWidget(line)
