@@ -1,7 +1,7 @@
 #include "crypty/workflow.hpp"
 #include <filesystem>
 namespace crypty {
-Workflow::Workflow() { data_.target.path = "."; add_event("SESSION_OPENED", "Operator workspace initialized"); add_event("AUTH_BYPASSED", "Demo placeholder acknowledged"); add_event("ENGINE_READY", "Native demo engine ready"); }
+Workflow::Workflow() { data_.target.path = "."; add_event("SESSION_OPENED", "Operator workspace initialized"); add_event("AUTH_BYPASSED", "Demo placeholder acknowledged"); add_event("ENGINE_READY", "Demo engine ready"); }
 void Workflow::add_event(const std::string& code, const std::string& message) { data_.audit.push_back({code, message}); }
 void Workflow::select_operation(Operation operation) { data_.operation = operation; data_.target.strategy = operation == Operation::Erasure ? "Cryptographic erase + verify" : "Filesystem + carving"; data_.target.risk = operation == Operation::Erasure ? "Destructive operation" : "Read-only analysis"; data_.state = State::Ready; data_.progress = 0; data_.integrity = "Pending"; add_event("MODE_SELECTED", operation == Operation::Erasure ? "Sanitization workflow selected" : "Recovery workflow selected"); }
 namespace {

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(crypty VERSION 0.1.0 LANGUAGES CXX)
 
 include(CTest)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 add_library(crypty_core
 	core/src/workflow.cpp
@@ -16,14 +17,8 @@ if(BUILD_TESTING)
 	add_test(NAME crypty_workflow COMMAND crypty_workflow_test)
 endif()
 
-if(WIN32)
-	add_executable(crypty WIN32 app/main.cpp ui/desktop_ui.cpp resources/crypty.rc)
-	target_include_directories(crypty PRIVATE ui)
-	target_link_libraries(crypty PRIVATE crypty_core comctl32)
-	target_compile_features(crypty PRIVATE cxx_std_17)
-else()
-	add_custom_target(crypty_demo ALL
-		COMMAND ${CMAKE_COMMAND} -E echo "Crypty native demo currently targets Windows; open ui/index.html for the browser fallback"
-		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-	)
-endif()
+add_custom_target(crypty_ui
+	COMMAND ${Python3_EXECUTABLE} -m crypty.app.main
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+	COMMENT "Launching the Crypty PySide6 UI"
+)

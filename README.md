@@ -1,18 +1,28 @@
 # Crypty
 
 Crypty is an integrated digital forensics and data sanitization platform skeleton.
-The code is intentionally split into a portable C++ workflow core, reporting,
-and a replaceable desktop frontend. The MVP never touches real storage.
+The desktop frontend is a PySide6 application backed by a portable C++ workflow
+core. The MVP never touches real storage.
 
-## Run the native demo
+## Run the Python Qt UI
 
-On Windows with MinGW g++, build the executable from the repository root:
+Install the Python dependency from the repository root:
 
 ```powershell
-g++ -std=c++17 -municode -mwindows app/main.cpp ui/desktop_ui.cpp core/src/workflow.cpp reporting/report.cpp crypty_res.o -Iui -Icore/include -Ireporting -o crypty.exe -lcomctl32
+python -m pip install -r requirements.txt
 ```
 
-Then run `crypty.exe`. The native demo is the primary MVP surface.
+Run the UI from the directory containing the `crypty` package:
+
+```powershell
+python -m crypty.app.main
+```
+
+From this repository directory, use the makefile shortcut:
+
+```powershell
+make run
+```
 
 ## CMake build
 
@@ -22,19 +32,16 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-On Windows, CMake builds the native `crypty.exe`. On other platforms it builds
-the portable `crypty_core` library and leaves the UI adapter as the next step.
-
-Place your `crypty.ico` file at `resources/crypty.ico` before building the
-Windows target. It is used for the executable, window, and taskbar icon.
+The CMake build compiles the portable `crypty_core` library and exposes a
+`crypty_ui` target that launches the Python Qt application.
 
 ## Layout
 
 - `core/include/crypty/`: public workflow model and API
 - `core/src/`: media-aware operation state and audit events
 - `reporting/`: report serialization boundary
-- `app/`: executable bootstrap only; calls `initialize_ui()`
-- `ui/`: desktop presentation layer; replace with Qt, wxWidgets, or another native UI
+- `app/`: Python application bootstrap
+- `ui/`: PySide6 desktop presentation layer
 - `auth/`, `ml/`: reserved and intentionally untouched
 
 The sanitization language is intentionally framed as procedures designed with
