@@ -5,13 +5,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QFileDialog,
+    QMessageBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 from PySide6.QtCore import Qt
 
-from crypty.data.demo_data import REPORT_SUMMARY
+from data.demo_data import REPORT_SUMMARY
 
 class ReportsPage(QWidget):
     def __init__(self, main_window, audit_only=False):
@@ -30,7 +32,7 @@ class ReportsPage(QWidget):
             return
 
         device = self.main_window.device_manager.get_selected_device()
-        recovery = self.main_window.backend.recover_files(device)
+        inspection = self.main_window.backend.analyze_device(device)
 
         title = QLabel("Investigation Report")
         title.setFixedHeight(24)
@@ -50,7 +52,7 @@ class ReportsPage(QWidget):
             ("DEVICE", device["name"]),
             ("OPERATION", "Recovery Analysis"),
             ("START", "Current session"),
-            ("STATUS", recovery["integrity"]),
+            ("STATUS", "Inspected"),
         ]
 
         for label, value in fields:
@@ -70,10 +72,10 @@ class ReportsPage(QWidget):
         stats_layout.setContentsMargins(18, 16, 18, 16)
         stats_layout.setSpacing(12)
         stats_layout.addWidget(QLabel(
-            f"RECOVERY RESULTS\n{recovery['files_found']} files identified\n"
-            f"{recovery['recoverable']} high-confidence results"
+            f"INDEXED EVIDENCE\n{inspection['evidence_items']} entries identified\n"
+            f"{inspection['total_bytes']:,} bytes indexed"
         ))
-        stats_layout.addWidget(QLabel(f"INTEGRITY\n{recovery['integrity']}"))
+        stats_layout.addWidget(QLabel("INTEGRITY\nRead-only inspection"))
         stats_layout.addWidget(QLabel(f"AUDIT\n{len(self.main_window.backend.audit_events())} events recorded"))
         report_columns = QHBoxLayout()
         report_columns.setSpacing(16)
@@ -104,7 +106,8 @@ class ReportsPage(QWidget):
         integrity.setStyleSheet("color: #a8d9d3; font-size: 11px; letter-spacing: 0.10em; border: 1px solid #2b363d; background: #171c1f; padding: 6px 10px;")
         layout.addWidget(integrity)
 
-        log_panel = QFrame()
+        self.audit_log_panel = QFrame()
+        log_panel = self.audit_log_panel
         log_panel.setStyleSheet("background: #171c1f; border: 1px solid #2b363d;")
         log_layout = QVBoxLayout(log_panel)
         log_layout.setContentsMargins(18, 16, 18, 16)
@@ -121,25 +124,48 @@ class ReportsPage(QWidget):
         layout.addStretch(1)
 
     def _preview_report(self):
+        device = self.main_window.device_manager.get_selected_device()
+        inspection = self.main_window.backend.analyze_device(device)
         self._preview = QTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setPlainText(
             "Crypty Investigation Report\n"
             "Case: CRYPTY-001\n"
             "Operator: Investigator session\n"
-            "Device: Samsung Portable SSD\n"
-            "Operation: Recovery Analysis\n"
-            "Status: Completed\n\n"
-            "Report preview. No live evidence was acquired or modified."
+            f"Device: {device['name']}\n"
+            "Operation: Read-only inspection\n"
+            f"Filesystem: {inspection['filesystem']}\n"
+            f"Entries identified: {inspection['evidence_items']}\n"
+            f"Bytes indexed: {inspection['total_bytes']:,}\n\n"
+            "Report generated from the native workflow engine."
         )
         self._preview.show()
 
     def _export_report(self):
-        self._preview = QTextEdit()
-        self._preview.setReadOnly(True)
-        self._preview.setPlainText(
-            "REPORT EXPORT PREVIEW\n"
-            "Crypty report export prepared successfully.\n"
-            "No physical data was modified."
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Crypty report",
+            "crypty-report.json",
+            "JSON report (*.json)",
         )
-        self._preview.show()
+        if not filename:
+            return
+        if self.main_window.backend.write_report(filename):
+            QMessageBox.information(self, "Report exported", f"Report saved to:\n{filename}")
+        else:
+            QMessageBox.critical(self, "Report export failed", "The native workflow could not write the report.")
+
+    def on_show(self):
+        if self.audit_only:
+            layout = self.audit_log_panel.layout()
+            while layout.count():
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            for event in self.main_window.backend.audit_events():
+                line = QLabel(f"{event['action']}\n{event['message']}")
+                line.setStyleSheet(
+                    "font-family: 'Consolas'; font-size: 12px; "
+                    "border-bottom: 1px solid #2b363d; padding-bottom: 6px;"
+                )
+                layout.addWidget(line)

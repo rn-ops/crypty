@@ -4,7 +4,9 @@ from pathlib import Path
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from crypty.ui.main_window import CryptyMainWindow
+from auth_client import AuthClient
+from ui.login import LoginDialog
+from ui.main_window import CryptyMainWindow
 
 
 def resource_path(relative_path: str) -> Path:
@@ -19,7 +21,11 @@ def main() -> int:
     icon_path = resource_path("resources/crypty.ico")
     app.setWindowIcon(QIcon(str(icon_path)))
 
-    window = CryptyMainWindow()
+    login = LoginDialog(AuthClient())
+    if login.exec() != LoginDialog.Accepted or login.session is None:
+        return 0
+
+    window = CryptyMainWindow(login.session)
     window.setWindowIcon(QIcon(str(icon_path)))
     window.show()
     return app.exec()

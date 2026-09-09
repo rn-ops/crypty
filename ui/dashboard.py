@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crypty.data.demo_data import RECENT_OPERATIONS
+from data.demo_data import RECENT_OPERATIONS
 
 
 class DashboardPage(QWidget):

@@ -1,6 +1,6 @@
-# SecureForensics — Authentication & Access Control Module
+# Crypty — Authentication & Access Control Module
 
-This is the **security/authentication layer** for the SecureForensics project
+This is the **security/authentication layer** for the Crypty project
 (Integrated Secure Data Erasure and Advanced File Recovery Tool). It sits in
 front of the Recovery and Erasure modules and enforces:
 
@@ -60,6 +60,14 @@ export SECUREFORENSICS_FACE_ENC_KEY="$(python -c 'import os,base64; print(base64
 # One-time: create the first admin account (bypasses the API, since the
 # register endpoint itself requires an admin token — bootstrap problem)
 python create_first_admin.py admin1 "AdminPass123!"
+```
+
+If the account already exists, the bootstrap script will not overwrite its
+password. Reset it explicitly with:
+
+```bash
+python reset_password.py admin1 "NewStrongPassword"
+```
 
 # Start the API server
 python app.py

@@ -12,22 +12,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crypty.core.native_backend import NativeBackend
-from crypty.core.device_manager import DeviceManager
-from crypty.core.recovery_engine import RecoveryEngine
-from crypty.core.sanitization_engine import SanitizationEngine
-from crypty.ui.dashboard import DashboardPage
-from crypty.ui.devices import DevicesPage
-from crypty.ui.recovery import RecoveryPage
-from crypty.ui.sanitization import SanitizationPage
-from crypty.ui.reports import ReportsPage
-from crypty.ui.styles import APP_STYLESHEET
-from crypty.ui.page_header import create_workspace_header
+from auth_client import AuthSession
+from core.native_backend import NativeBackend
+from core.device_manager import DeviceManager
+from core.recovery_engine import RecoveryEngine
+from core.sanitization_engine import SanitizationEngine
+from ui.dashboard import DashboardPage
+from ui.devices import DevicesPage
+from ui.recovery import RecoveryPage
+from ui.sanitization import SanitizationPage
+from ui.reports import ReportsPage
+from ui.styles import APP_STYLESHEET
+from ui.page_header import create_workspace_header
 
 
 class CryptyMainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, session: AuthSession):
         super().__init__()
+        self.session = session
         self.setWindowTitle("Crypty")
         self.resize(1400, 850)
         self.setMinimumSize(1200, 760)
@@ -119,8 +121,8 @@ class CryptyMainWindow(QMainWindow):
         footer_layout.setContentsMargins(0, 6, 0, 0)
         footer_layout.setSpacing(2)
 
-        footer_layout.addWidget(QLabel("Crypty"))
-        footer_layout.addWidget(QLabel("Read-only demonstration environment"))
+        footer_layout.addWidget(QLabel(f"{self.session.username}  |  {self.session.role}"))
+        footer_layout.addWidget(QLabel("Authenticated workspace"))
         footer_layout.addWidget(QLabel("Storage writes disabled"))
         sidebar_layout.addWidget(footer)
 

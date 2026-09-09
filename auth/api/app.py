@@ -1,7 +1,7 @@
 """
 app.py
 ------
-SecureForensics Authentication & Access Control API.
+Crypty Authentication & Access Control API.
 
 Endpoints:
   POST /api/admin/register        (admin only) create a new user with password + role
@@ -23,7 +23,6 @@ from flask_cors import CORS
 
 from database.db import init_db, get_connection
 from auth_utils import hash_password, verify_password, generate_token
-from face_auth import enroll_face, authenticate_face
 from rbac import token_required, role_required
 from audit import log_action, verify_chain, get_logs
 
@@ -32,6 +31,9 @@ CORS(app)
 
 init_db()
 
+@app.route("/", methods=["GET"])
+def health_check():
+    return jsonify({"service": "Crypty authentication", "status": "ok"}), 200
 
 # ------------------------------------------------------------------
 # ADMIN: create a new user (password-based credentials + assigned role)
@@ -76,6 +78,8 @@ def register_user():
 @token_required
 @role_required("admin")
 def enroll_face_route():
+    from face_auth import enroll_face
+
     data = request.get_json(force=True)
     username = data.get("username")
     images = data.get("images", [])  # list of base64-encoded image strings
@@ -131,6 +135,8 @@ def login_password():
 # ------------------------------------------------------------------
 @app.route("/api/auth/login-face", methods=["POST"])
 def login_face():
+    from face_auth import authenticate_face
+
     data = request.get_json(force=True)
     username = data.get("username")
     image = data.get("image")  # single base64 image from live capture
@@ -206,4 +212,4 @@ def run_erasure():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

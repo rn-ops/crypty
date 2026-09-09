@@ -1,0 +1,19 @@
+{
+  "product": "Crypty",
+  "caseId": "CASE-0248",
+  "operation": "recovery",
+  "target": "D:\\",
+  "state": 3,
+  "progress": 100,
+  "evidenceItems": 128,
+  "totalBytes": 54378636560,
+  "integrity": "100% verified",
+  "files": [
+    {"name":".tempfstat","type":"File","path":"D:\\.tempfstat","size":0,"recoverable":0},
+    {"name":".smz","type":"Folder","path":"D:\\.smz","size":0,"recoverable":0},
+    {"name":"20260207_145330.mp4","type":"File","path":"D:\\20260207_145330.mp4","size":3748947476,"recoverable":3748947476},
+    {"name":"System Volume Information","type":"Folder","path":"D:\\System Volume Information","size":88,"recoverable":0},
+    {"name":"moms","type":"Folder","path":"D:\\moms","size":50629688996,"recoverable":0}
+  ],
+  "audit": [{"code":"SESSION_OPENED","message":"Operator workspace initialized"},{"code":"AUTH_BYPASSED","message":"Demo placeholder acknowledged"},{"code":"ENGINE_READY","message":"Demo engine ready"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"OPERATION_STARTED","message":"Recovery preview started"},{"code":"VERIFICATION_PASS","message":"Preview passed verification gate"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"OPERATION_STARTED","message":"Recovery preview started"},{"code":"VERIFICATION_PASS","message":"Preview passed verification gate"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"OPERATION_STARTED","message":"Recovery preview started"},{"code":"VERIFICATION_PASS","message":"Preview passed verification gate"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"OPERATION_STARTED","message":"Recovery preview started"},{"code":"VERIFICATION_PASS","message":"Preview passed verification gate"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"MODE_SELECTED","message":"Recovery workflow selected"},{"code":"TARGET_INSPECTED","message":"Directory contents indexed read-only"},{"code":"OPERATION_STARTED","message":"Recovery preview started"},{"code":"VERIFICATION_PASS","message":"Preview passed verification gate"}]
+}

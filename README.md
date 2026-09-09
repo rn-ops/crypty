@@ -12,11 +12,33 @@ Install the Python dependency from the repository root:
 python -m pip install -r requirements.txt
 ```
 
+The desktop UI authenticates against the Flask service in `auth/api`. Install
+its dependencies and create the first admin account once:
+
+```powershell
+py -3 -m pip install -r auth\api\requirements.txt
+cd auth\api
+py -3 create_first_admin.py admin1 "choose-a-strong-password"
+py -3 app.py
+```
+
+`create_first_admin.py` only creates a new account. If `admin1` already exists,
+reset its password explicitly:
+
+```powershell
+py -3 reset_password.py admin1 "choose-a-strong-password"
+```
+
+Leave that service running on `http://127.0.0.1:5000`, open a second terminal,
+and launch the desktop UI from the directory containing the `crypty` package:
+
 Run the UI from the directory containing the `crypty` package:
 
 ```powershell
 python -m crypty.app.main
 ```
+
+Set `CRYPTY_AUTH_URL` if the authentication service runs elsewhere.
 
 From this repository directory, use the makefile shortcut:
 

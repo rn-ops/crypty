@@ -1,7 +1,7 @@
 """
 database/db.py
 --------------
-SQLite database setup for SecureForensics authentication system.
+SQLite database setup for Crypty authentication system.
 
 Tables:
   users       -> stores login credentials, role, and face-enrollment status

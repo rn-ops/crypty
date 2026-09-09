@@ -176,5 +176,9 @@ class DevicesPage(QWidget):
         QMessageBox.information(
             self,
             "Metadata inspection",
-            "Analysis complete\nFilesystem detected: NTFS\nMedia type: SSD\nRead-only analysis completed\n\nStorage writes are disabled in this environment.",
+            f"Analysis complete\nFilesystem detected: {result['filesystem']}\n"
+            f"Media type: {result['media_type']}\n"
+            f"Evidence entries: {result['evidence_items']}\n"
+            f"Total bytes: {result['total_bytes']:,}\n\n"
+            "Read-only analysis completed.",
         )

@@ -1,9 +1,0 @@
-{
-  "product": "Crypty",
-  "caseId": "CASE-0248",
-  "operation": "recovery-preview",
-  "target": "C:\Users\spot\Desktop\.minecraft",
-  "verification": "verified-simulated",
-  "reference": "NIST SP 800-88 Rev. 2 (reference only)",
-  "demo": true
-}

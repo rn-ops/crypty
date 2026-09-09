@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from crypty.data.demo_data import DEMO_DEVICES
-
-
 class DeviceManager:
     def __init__(self, backend):
         self.backend = backend
-        self._devices = list(DEMO_DEVICES)
-        self._selected_device = self._devices[0]
+        self._devices = backend.detect_devices()
+        self._selected_device = self._devices[0] if self._devices else None
 
     def get_devices(self) -> list[dict]:
         return self._devices

@@ -50,6 +50,8 @@ class NativeBackend:
         library.crypty_workflow_inspect_target.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         library.crypty_workflow_start.argtypes = [ctypes.c_void_p]
         library.crypty_workflow_advance.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        library.crypty_workflow_write_report.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        library.crypty_workflow_write_report.restype = ctypes.c_int
         for name in (
             "crypty_workflow_state",
             "crypty_workflow_progress",
@@ -77,6 +79,19 @@ class NativeBackend:
         for name in ("crypty_workflow_audit_code", "crypty_workflow_audit_message"):
             getattr(library, name).argtypes = [ctypes.c_void_p, ctypes.c_size_t]
             getattr(library, name).restype = ctypes.c_char_p
+        library.crypty_device_count.restype = ctypes.c_size_t
+        for name in (
+            "crypty_device_path",
+            "crypty_device_name",
+            "crypty_device_filesystem",
+            "crypty_device_media_type",
+            "crypty_device_interface",
+            "crypty_device_status",
+        ):
+            getattr(library, name).argtypes = [ctypes.c_size_t]
+            getattr(library, name).restype = ctypes.c_char_p
+        library.crypty_device_capacity.argtypes = [ctypes.c_size_t]
+        library.crypty_device_capacity.restype = ctypes.c_uint64
 
     def __del__(self):
         workflow = getattr(self, "_workflow", None)
@@ -101,6 +116,47 @@ class NativeBackend:
             "evidence_items": self._library.crypty_workflow_evidence_items(self._workflow),
             "total_bytes": self._library.crypty_workflow_total_bytes(self._workflow),
         }
+
+    def detect_devices(self) -> list[dict]:
+        devices = []
+        for index in range(self._library.crypty_device_count()):
+            text = lambda name: getattr(self._library, name)(index).decode("utf-8")
+            capacity = self._library.crypty_device_capacity(index)
+            devices.append(
+                {
+                    "id": text("crypty_device_path"),
+                    "name": text("crypty_device_name"),
+                    "capacity": self._format_capacity(capacity),
+                    "capacity_bytes": capacity,
+                    "interface": text("crypty_device_interface"),
+                    "media_type": text("crypty_device_media_type"),
+                    "filesystem": text("crypty_device_filesystem"),
+                    "health": "Available",
+                    "mount": text("crypty_device_path"),
+                    "path": text("crypty_device_path"),
+                    "status": text("crypty_device_status"),
+                    "type": text("crypty_device_media_type"),
+                }
+            )
+        return devices
+
+    @staticmethod
+    def _format_capacity(value: int) -> str:
+        units = ("B", "KB", "MB", "GB", "TB", "PB")
+        amount = float(value)
+        unit = units[0]
+        for unit in units:
+            if amount < 1024 or unit == units[-1]:
+                break
+            amount /= 1024
+        return f"{amount:.0f} {unit}"
+
+    def write_report(self, filename: str) -> bool:
+        return bool(
+            self._library.crypty_workflow_write_report(
+                self._workflow, filename.encode("utf-8")
+            )
+        )
 
     def recover_files(self, device: dict) -> dict:
         self._library.crypty_workflow_select_operation(self._workflow, 0)

@@ -22,7 +22,9 @@ def main() -> None:
         "-static-libstdc++",
         str(ROOT / "core" / "src" / "workflow.cpp"),
         str(ROOT / "core" / "src" / "native_bridge.cpp"),
+        str(ROOT / "reporting" / "report.cpp"),
         "-I" + str(ROOT / "core" / "include"),
+        "-I" + str(ROOT / "reporting"),
         "-o",
         str(OUTPUT),
     ]
