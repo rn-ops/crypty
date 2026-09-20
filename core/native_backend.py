@@ -21,26 +21,42 @@ class NativeBackend:
             raise RuntimeError("The Crypty workflow engine could not be created")
 
     def _find_library(self) -> Path:
-        library_name = "crypty_native.dll" if sys.platform == "win32" else "libcrypty_native.so"
+        library_name = (
+            "crypty_native.dll"
+            if sys.platform == "win32"
+            else "libcrypty_native.so"
+        )
+
+        project_root = Path(__file__).resolve().parents[1]
+
         candidates = []
+
         configured = os.environ.get("CRYPTY_NATIVE_LIBRARY")
         if configured:
             candidates.append(Path(configured))
 
-        bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
-        candidates.extend(
-            [
+        candidates.extend([
+            project_root / library_name,
+            project_root / "build" / "Release" / library_name,
+            project_root / "build" / library_name,
+        ])
+
+        # Also support PyInstaller later
+        if hasattr(sys, "_MEIPASS"):
+            bundle_root = Path(sys._MEIPASS)
+            candidates.extend([
                 bundle_root / library_name,
                 bundle_root / "_internal" / library_name,
-                Path(__file__).resolve().parents[1] / "build" / "Release" / library_name,
-                Path(__file__).resolve().parents[1] / "build" / library_name,
-            ]
-        )
+            ])
+
         for candidate in candidates:
             if candidate.is_file():
-                return candidate
-        searched = "\n".join(str(candidate) for candidate in candidates)
-        raise FileNotFoundError(f"Crypty native engine not found. Searched:\n{searched}")
+                return candidate.resolve()
+
+        searched = "\n".join(str(p.resolve()) for p in candidates)
+        raise FileNotFoundError(
+            f"Crypty native engine not found. Searched:\n{searched}"
+        )
 
     def _configure_library(self):
         library = self._library
@@ -67,13 +83,59 @@ class NativeBackend:
         ):
             getattr(library, name).argtypes = [ctypes.c_void_p]
             getattr(library, name).restype = ctypes.c_char_p
+
         library.crypty_workflow_file_count.argtypes = [ctypes.c_void_p]
         library.crypty_workflow_file_count.restype = ctypes.c_size_t
-        for name in ("crypty_workflow_file_name", "crypty_workflow_file_type"):
-            getattr(library, name).argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+
+        library.crypty_workflow_scan_ntfs.argtypes = [
+            ctypes.c_void_p
+        ]
+        library.crypty_workflow_scan_ntfs.restype = ctypes.c_size_t
+
+        for name in (
+            "crypty_workflow_file_name",
+            "crypty_workflow_file_type",
+            "crypty_workflow_file_path",
+        ):
+            getattr(library, name).argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_size_t,
+            ]
             getattr(library, name).restype = ctypes.c_char_p
+
         library.crypty_workflow_file_size.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
         library.crypty_workflow_file_size.restype = ctypes.c_uint64
+        library.crypty_workflow_scan_fat32_deleted.argtypes = [ctypes.c_void_p]
+        library.crypty_workflow_scan_fat32_deleted.restype = ctypes.c_size_t
+        library.crypty_workflow_recover_fat32_file.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+        library.crypty_workflow_recover_fat32_file.restype = ctypes.c_uint64
+
+
+        library.crypty_workflow_recover_ntfs_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_int),
+        ]
+
+        library.crypty_workflow_recover_ntfs_file.restype = ctypes.c_uint64
+
+        for name in (
+            "crypty_workflow_file_offset",
+            "crypty_workflow_file_confidence",
+            "crypty_workflow_file_deleted",
+        ):
+            getattr(library, name).argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        library.crypty_workflow_file_offset.restype = ctypes.c_uint64
+        library.crypty_workflow_file_confidence.restype = ctypes.c_int
+        library.crypty_workflow_file_deleted.restype = ctypes.c_int
+        library.crypty_workflow_file_method.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        library.crypty_workflow_file_method.restype = ctypes.c_char_p
+        library.crypty_workflow_read_media.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+        ]
+
+        library.crypty_workflow_read_media.restype = ctypes.c_size_t
         library.crypty_workflow_audit_count.argtypes = [ctypes.c_void_p]
         library.crypty_workflow_audit_count.restype = ctypes.c_size_t
         for name in ("crypty_workflow_audit_code", "crypty_workflow_audit_message"):
@@ -93,6 +155,36 @@ class NativeBackend:
         library.crypty_device_capacity.argtypes = [ctypes.c_size_t]
         library.crypty_device_capacity.restype = ctypes.c_uint64
 
+
+        library.crypty_workflow_file_created.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+        ]
+        library.crypty_workflow_file_created.restype = ctypes.c_char_p
+
+        library.crypty_workflow_file_modified.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+        ]
+        library.crypty_workflow_file_modified.restype = ctypes.c_char_p
+
+        library.crypty_workflow_file_accessed.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+        ]
+        library.crypty_workflow_file_accessed.restype = ctypes.c_char_p
+
+
+        library.crypty_workflow_recover_ntfs_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_int),
+        ]
+
+        library.crypty_workflow_recover_ntfs_file.restype = ctypes.c_uint64
+
+
     def __del__(self):
         workflow = getattr(self, "_workflow", None)
         library = getattr(self, "_library", None)
@@ -106,6 +198,7 @@ class NativeBackend:
         self._library.crypty_workflow_inspect_target(
             self._workflow, device.get("path", ".").encode("utf-8")
         )
+        self._active_target = device.get("path", ".")
 
     def analyze_device(self, device: dict) -> dict:
         self._inspect(device)
@@ -158,6 +251,74 @@ class NativeBackend:
             )
         )
 
+
+    def _recovery_entries_from_native(self) -> list[dict]:
+        entries = []
+
+        count = self._library.crypty_workflow_file_count(self._workflow)
+
+        for index in range(count):
+            size = self._library.crypty_workflow_file_size(
+                self._workflow, index
+            )
+            deleted = bool(
+                self._library.crypty_workflow_file_deleted(
+                    self._workflow, index
+                )
+            )
+            confidence = self._library.crypty_workflow_file_confidence(
+                self._workflow, index
+            )
+
+            method = self._library.crypty_workflow_file_method(
+                self._workflow, index
+            ).decode("utf-8")
+
+            name = self._library.crypty_workflow_file_name(
+                self._workflow, index
+            ).decode("utf-8")
+
+            path = self._library.crypty_workflow_file_path(
+                self._workflow, index
+            ).decode("utf-8")
+
+            file_type = self._library.crypty_workflow_file_type(
+                self._workflow, index
+            ).decode("utf-8")
+
+            created = self._library.crypty_workflow_file_created(
+                self._workflow, index
+            ).decode("utf-8")
+
+            modified = self._library.crypty_workflow_file_modified(
+                self._workflow, index
+            ).decode("utf-8")
+
+            accessed = self._library.crypty_workflow_file_accessed(
+                self._workflow, index
+            ).decode("utf-8")
+
+            entries.append({
+                "native_index": index,
+                "file": name,
+                "path": path,
+                "type": file_type,
+                "size": f"{size:,} B",
+                "size_bytes": size,
+                "recoverable": size if deleted else 0,
+                "method": method,
+                "confidence": confidence,
+                "status": "Traced" if deleted else "Existing",
+                "deleted": deleted,
+                "created": created,
+                "modified": modified,
+                "accessed": accessed,
+            })
+            
+
+        return entries
+
+
     def recover_files(self, device: dict) -> dict:
         self._library.crypty_workflow_select_operation(self._workflow, 0)
         self._inspect(device)
@@ -191,6 +352,122 @@ class NativeBackend:
             )
         return entries
 
+
+
+
+
+    def recover_fat32_file(self, entry: dict, destination: str) -> tuple[int, bool]:
+            complete = ctypes.c_int()
+            written = self._library.crypty_workflow_recover_fat32_file(
+                self._workflow, entry["native_index"], destination.encode("utf-8"), ctypes.byref(complete)
+            )
+            return written, bool(complete.value)
+
+
+    def recover_ntfs_file(
+        self,
+        entry: dict,
+        destination: str,
+    ) -> tuple[int, bool]:
+
+        complete = ctypes.c_int(0)
+
+        written = (
+            self._library.crypty_workflow_recover_ntfs_file(
+                self._workflow,
+                entry["native_index"],
+                os.fsencode(destination),
+                ctypes.byref(complete),
+            )
+        )
+
+        return int(written), bool(complete.value)
+
+
+
+    def scan_fat32_deleted_files(self, device: dict) -> list[dict]:
+        self._prepare_recovery_scan(device)
+
+        self._library.crypty_workflow_scan_fat32_deleted(
+            self._workflow
+        )
+
+        return self._recovery_entries_from_native()
+
+    def scan_ntfs_files(self, device: dict) -> list[dict]:
+        self._prepare_recovery_scan(device)
+
+        count = self._library.crypty_workflow_scan_ntfs(self._workflow)
+
+        print(f"Python: native NTFS scan returned {count} entries")
+
+        entries = self._recovery_entries_from_native()
+
+        print(f"Python: workflow contains {len(entries)} entries")
+
+        return entries
+    
+    def recover_ntfs_file(self, index, destination):
+        complete = ctypes.c_int(0)
+
+        bytes_recovered = (
+            self._library.crypty_workflow_recover_ntfs_file(
+                self._workflow,
+                index,
+                os.fsencode(destination),
+                ctypes.byref(complete),
+            )
+        )
+
+        return int(bytes_recovered), bool(complete.value)
+
+    def scan_exfat_deleted_files(self, device: dict) -> list[dict]:
+        self._prepare_recovery_scan(device)
+
+        self._library.crypty_workflow_scan_exfat_deleted(
+            self._workflow
+        )
+
+        return self._recovery_entries_from_native()
+
+
+    def _prepare_recovery_scan(self, device: dict):
+        self._library.crypty_workflow_select_operation(
+            self._workflow,
+            0
+        )
+
+        if (
+            getattr(self, "_active_target", None)
+            != device.get("path", ".")
+        ):
+            self._inspect(device)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    def read_media(self, device: dict, offset: int, length: int = 512) -> bytes:
+        """Read one bounded page of evidence bytes; the native handle is read-only."""
+        if offset < 0 or length < 1 or length > 1024 * 1024:
+            raise ValueError("Evidence reads must be between 1 byte and 1 MiB")
+        if getattr(self, "_active_target", None) != device.get("path", "."):
+            self._inspect(device)
+        buffer = (ctypes.c_ubyte * length)()
+        read = self._library.crypty_workflow_read_media(
+            self._workflow, offset, buffer, length
+        )
+        return bytes(buffer[:read])
+    
     def audit_events(self) -> list[dict]:
         events = []
         for index in range(self._library.crypty_workflow_audit_count(self._workflow)):

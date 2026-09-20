@@ -13,7 +13,6 @@ def main() -> None:
     compiler = shutil.which("g++")
     if compiler is None:
         raise SystemExit("g++ was not found. Install MinGW or build crypty_native with CMake.")
-
     command = [
         compiler,
         "-std=c++17",
@@ -21,6 +20,9 @@ def main() -> None:
         "-static-libgcc",
         "-static-libstdc++",
         str(ROOT / "core" / "src" / "workflow.cpp"),
+        str(ROOT / "core" / "recovery" / "fat32_detector.cpp"),
+        str(ROOT / "core" / "recovery" / "ntfs_detector.cpp"),
+        str(ROOT / "core" / "recovery" / "exfat_detector.cpp"),
         str(ROOT / "core" / "src" / "native_bridge.cpp"),
         str(ROOT / "reporting" / "report.cpp"),
         "-I" + str(ROOT / "core" / "include"),
@@ -35,7 +37,6 @@ def main() -> None:
         shutil.copy2(runtime, ROOT / runtime.name)
 
     print(f"Built {OUTPUT}")
-
 
 if __name__ == "__main__":
     main()

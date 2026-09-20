@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crypty.data.demo_data import RECOVERY_RESULTS
+from data.demo_data import RECOVERY_RESULTS
 
 
 class SimulatedBackend:

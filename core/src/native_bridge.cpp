@@ -1,10 +1,14 @@
 #include "crypty/workflow.hpp"
 #include "report.hpp"
+#include "../recovery/fat32_detector.hpp"
+#include "../recovery/ntfs_detector.hpp"
+#include "../recovery/exfat_detector.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -89,6 +93,139 @@ const std::vector<Device>& devices() {
     return value;
 }
 
+std::string raw_media_path(const std::string& path) {
+#ifdef _WIN32
+    if (path.size() >= 2 && path[1] == ':') return "\\\\.\\" + path.substr(0, 2);
+#endif
+    return path;
+}
+
+std::size_t read_media(const std::string& path, std::uint64_t offset,
+                       std::uint8_t* output, std::size_t capacity) {
+    if (output == nullptr || capacity == 0) return 0;
+#ifdef _WIN32
+
+    const auto media = raw_media_path(path);
+
+    HANDLE handle = CreateFileA(
+        media.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ |
+        FILE_SHARE_WRITE |
+        FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+
+    if (handle == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+
+    constexpr std::uint64_t SECTOR_SIZE = 512;
+
+    const std::uint64_t aligned_offset =
+        offset -
+        (offset % SECTOR_SIZE);
+
+    const std::uint64_t offset_delta =
+        offset -
+        aligned_offset;
+
+    const std::uint64_t aligned_size =
+        ((offset_delta + capacity + SECTOR_SIZE - 1) /
+            SECTOR_SIZE) *
+        SECTOR_SIZE;
+
+    if (aligned_size > 1024ULL * 1024ULL) {
+        CloseHandle(handle);
+        return 0;
+    }
+
+    std::vector<std::uint8_t> aligned_buffer(
+        static_cast<std::size_t>(aligned_size)
+    );
+
+    LARGE_INTEGER position{};
+    position.QuadPart =
+        static_cast<LONGLONG>(aligned_offset);
+
+    DWORD bytes_read = 0;
+
+    const bool seek_ok =
+        SetFilePointerEx(
+            handle,
+            position,
+            nullptr,
+            FILE_BEGIN
+        );
+
+    const bool read_ok =
+        seek_ok &&
+        ReadFile(
+            handle,
+            aligned_buffer.data(),
+            static_cast<DWORD>(aligned_size),
+            &bytes_read,
+            nullptr
+        );
+
+    if (!read_ok) {
+
+        std::printf(
+            "RAW READ FAILED: offset=%llu aligned=%llu "
+            "requested=%zu aligned_size=%llu error=%lu\n",
+            static_cast<unsigned long long>(offset),
+            static_cast<unsigned long long>(aligned_offset),
+            capacity,
+            static_cast<unsigned long long>(aligned_size),
+            static_cast<unsigned long>(GetLastError())
+        );
+
+        CloseHandle(handle);
+        return 0;
+    }
+
+    if (
+        bytes_read <
+        offset_delta + capacity
+    ) {
+        CloseHandle(handle);
+        return 0;
+    }
+
+    memcpy(
+        output,
+        aligned_buffer.data() + offset_delta,
+        capacity
+    );
+
+    std::printf(
+        "RAW READ: offset=%llu requested=%zu "
+        "aligned=%llu read=%lu\n",
+        static_cast<unsigned long long>(offset),
+        capacity,
+        static_cast<unsigned long long>(aligned_offset),
+        static_cast<unsigned long>(bytes_read)
+    );
+
+    CloseHandle(handle);
+
+    return capacity;
+
+#else
+
+    (void)path;
+    (void)offset;
+    (void)output;
+    (void)capacity;
+    return 0;
+
+#endif
+}
+
+
 }
 
 extern "C" {
@@ -143,6 +280,32 @@ CRYPTY_API std::size_t crypty_workflow_file_count(void* handle) {
 CRYPTY_API const char* crypty_workflow_file_name(void* handle, std::size_t index) {
     const auto snapshot = workflow(handle)->snapshot();
     return index >= snapshot.files.size() ? empty_string().c_str() : copy_string(snapshot.files[index].name);
+}
+
+CRYPTY_API const char* crypty_workflow_file_path(
+    void* handle,
+    size_t index
+) {
+    static thread_local std::string value;
+
+    value.clear();
+
+    if (!handle) {
+        return "";
+    }
+
+    auto* workflow =
+        static_cast<crypty::Workflow*>(handle);
+
+    const auto snapshot = workflow->snapshot();
+
+    if (index >= snapshot.files.size()) {
+        return "";
+    }
+
+    value = snapshot.files[index].path;
+
+    return value.c_str();
 }
 
 CRYPTY_API const char* crypty_workflow_file_type(void* handle, std::size_t index) {
@@ -203,4 +366,213 @@ CRYPTY_API const char* crypty_device_status(std::size_t index) {
 CRYPTY_API std::uint64_t crypty_device_capacity(std::size_t index) {
     return index >= devices().size() ? 0 : devices()[index].capacity;
 }
+
+CRYPTY_API std::uint64_t crypty_workflow_file_offset(void* handle, std::size_t index) {
+    const auto snapshot = workflow(handle)->snapshot();
+    return index >= snapshot.files.size() ? 0 : snapshot.files[index].source_offset;
+}
+
+CRYPTY_API int crypty_workflow_file_confidence(void* handle, std::size_t index) {
+    const auto snapshot = workflow(handle)->snapshot();
+    return index >= snapshot.files.size() ? 0 : snapshot.files[index].confidence;
+}
+
+CRYPTY_API int crypty_workflow_file_deleted(void* handle, std::size_t index) {
+    const auto snapshot = workflow(handle)->snapshot();
+    return index < snapshot.files.size() && snapshot.files[index].deleted ? 1 : 0;
+}
+
+CRYPTY_API const char* crypty_workflow_file_method(void* handle, std::size_t index) {
+    const auto snapshot = workflow(handle)->snapshot();
+    return index >= snapshot.files.size() ? empty_string().c_str() : copy_string(snapshot.files[index].recovery_method);
+}
+
+
+
+
+
+
+CRYPTY_API std::size_t crypty_workflow_scan_fat32_deleted(void* handle) {
+    if (handle == nullptr) return 0;
+    const auto path = workflow(handle)->snapshot().target.path;
+    const auto results = crypty::recovery::Fat32Detector::find_deleted_entries(
+        [&path](std::uint64_t offset, std::uint8_t* output, std::size_t capacity) {
+            return read_media(path, offset, output, capacity);
+        }
+    );
+    workflow(handle)->set_recovery_candidates(results);
+    return results.size();
+}
+
+// The source reader remains read-only; only the caller-provided destination is opened for output.
+CRYPTY_API std::uintmax_t crypty_workflow_recover_fat32_file(void* handle, std::size_t index,
+                                                             const char* destination, int* complete) {
+    if (complete != nullptr) *complete = 0;
+    if (handle == nullptr || destination == nullptr) return 0;
+    const auto snapshot = workflow(handle)->snapshot();
+    if (index >= snapshot.files.size()) return 0;
+    bool recovered_completely = false;
+    const auto path = snapshot.target.path;
+    const auto bytes = crypty::recovery::Fat32Detector::recover_to(
+        [&path](std::uint64_t offset, std::uint8_t* output, std::size_t capacity) {
+            return read_media(path, offset, output, capacity);
+        }, snapshot.files[index], destination, recovered_completely
+    );
+    if (complete != nullptr) *complete = recovered_completely ? 1 : 0;
+    return bytes;
+}
+
+
+CRYPTY_API std::size_t crypty_workflow_scan_ntfs(
+    void* handle
+) {
+    if (handle == nullptr) return 0;
+
+    const auto path =
+        workflow(handle)->snapshot().target.path;
+
+    const auto results =
+        crypty::recovery::NtfsDetector::find_entries(
+            [&path](
+                std::uint64_t offset,
+                std::uint8_t* output,
+                std::size_t capacity
+            ) {
+                return read_media(
+                    path,
+                    offset,
+                    output,
+                    capacity
+                );
+            }
+        );
+
+    workflow(handle)->set_recovery_candidates(results);
+
+    return results.size();
+}
+
+CRYPTY_API std::uintmax_t crypty_workflow_recover_ntfs_file(
+    void* handle,
+    std::size_t index,
+    const char* destination,
+    int* complete
+) {
+    if (complete != nullptr) {
+        *complete = 0;
+    }
+
+    if (
+        handle == nullptr ||
+        destination == nullptr
+    ) {
+        return 0;
+    }
+
+    const auto snapshot =
+        workflow(handle)->snapshot();
+
+    if (index >= snapshot.files.size()) {
+        return 0;
+    }
+
+    bool recovered_completely = false;
+
+    const auto path =
+        snapshot.target.path;
+
+    const auto bytes =
+        crypty::recovery::NtfsDetector::recover_to(
+            [&path](
+                std::uint64_t offset,
+                std::uint8_t* output,
+                std::size_t capacity
+            ) {
+                return read_media(
+                    path,
+                    offset,
+                    output,
+                    capacity
+                );
+            },
+            snapshot.files[index],
+            destination,
+            recovered_completely
+        );
+
+    if (complete != nullptr) {
+        *complete =
+            recovered_completely ? 1 : 0;
+    }
+
+    return bytes;
+}
+
+
+
+
+
+// Bounded read-only byte access for the evidence hex viewer.
+CRYPTY_API std::size_t crypty_workflow_read_media(void* handle, std::uint64_t offset,
+                                                   std::uint8_t* output, std::size_t capacity) {
+    if (handle == nullptr) return 0;
+    return read_media(workflow(handle)->snapshot().target.path, offset, output, capacity);
+}
+
+
+// Recovery timestamps C++ to Python native bridge
+CRYPTY_API const char* crypty_workflow_file_created(
+    void* handle,
+    std::size_t index
+) {
+    if (handle == nullptr) {
+        return "";
+    }
+
+    const auto& files =
+        workflow(handle)->snapshot().files;
+
+    if (index >= files.size()) {
+        return "";
+    }
+
+    return files[index].created.c_str();
+}
+
+CRYPTY_API const char* crypty_workflow_file_modified(
+    void* handle,
+    std::size_t index
+) {
+    if (handle == nullptr) {
+        return "";
+    }
+
+    const auto& files =
+        workflow(handle)->snapshot().files;
+
+    if (index >= files.size()) {
+        return "";
+    }
+
+    return files[index].modified.c_str();
+}
+
+CRYPTY_API const char* crypty_workflow_file_accessed(
+    void* handle,
+    std::size_t index
+) {
+    if (handle == nullptr) {
+        return "";
+    }
+
+    const auto& files =
+        workflow(handle)->snapshot().files;
+
+    if (index >= files.size()) {
+        return "";
+    }
+
+    return files[index].accessed.c_str();
+}
+
 }

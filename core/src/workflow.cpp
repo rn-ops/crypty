@@ -44,6 +44,20 @@ void Workflow::inspect_target(const std::string& path) {
 }
 void Workflow::start() { data_.state = State::Running; data_.progress = 0; data_.integrity = "Pending"; add_event("OPERATION_STARTED", operation_name(data_.operation) + " preview started"); }
 void Workflow::advance(int step) { if (data_.state != State::Running) return; data_.progress += step; if (data_.progress >= 100) { data_.progress = 100; data_.state = State::Complete; data_.integrity = "100% verified"; data_.evidence_items = data_.operation == Operation::Erasure ? 0 : 128; add_event("VERIFICATION_PASS", "Preview passed verification gate"); } }
+void Workflow::set_recovery_candidates(
+    std::vector<FileEntry> files
+) {
+    data_.files = std::move(files);
+    data_.evidence_items =
+        static_cast<int>(data_.files.size());
+
+    data_.state = State::Inspected;
+
+    add_event(
+        "FILESYSTEM_SCAN",
+        "Read-only filesystem enumeration completed"
+    );
+}
 WorkflowSnapshot Workflow::snapshot() const { return data_; }
 std::string operation_name(Operation operation) { return operation == Operation::Erasure ? "Sanitization" : "Recovery"; }
 }

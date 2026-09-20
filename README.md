@@ -4,7 +4,194 @@ Crypty is an integrated digital forensics and data sanitization platform skeleto
 The desktop frontend is a PySide6 application backed by a portable C++ workflow
 core. The MVP never touches real storage.
 
+
+
+3. Preserve ALL data runs
+
+4. Then deleted-file detection
+✅ NTFS boot/partition detection
+✅ MFT enumeration
+✅ $FILE_NAME parsing
+✅ parent MFT references
+✅ reconstructed NTFS paths
+✅ $STANDARD_INFORMATION timestamps
+✅ data-run parsing
+✅ source offsets
+✅ read-only raw-media access
+✅ native → Python → UI pipeline
+⏳ preserve all data runs
+⏳ proper deleted-file detection
+⏳ actual recovery using those runs
+⏳ recovery validation/reporting
+#5 actual recovery
+
+Something like:
+
+Deleted FileEntry
+       ↓
+MFT metadata
+       ↓
+all data runs
+       ↓
+raw-media reads
+       ↓
+reconstruct bytes in order
+       ↓
+write recovered copy elsewhere
+       ↓
+verify size / hashes
+       ↓
+report
+
+Deleted file
+    ↓
+NTFS MFT record remains
+    ↓
+Crypty reads the MFT
+    ↓
+Detects inactive FILE record
+    ↓
+Extracts filename
+    ↓
+Extracts metadata/timestamps
+    ↓
+Preserves data runs
+    ↓
+FileEntry.deleted = true
+    ↓
+C++ → native bridge → Python
+    ↓
+UI displays "Traced"
+    ↓
+UI search finds it
+
+```
+recovery pipeline
+                    DELETED FILE
+                         │
+                         ▼
+                  FileEntry
+                         │
+                  ┌──────┴──────┐
+                  │             │
+             resident       non-resident
+               data            data runs
+                  │             │
+                  └──────┬──────┘
+                         ▼
+                  raw media reads
+                         │
+                         ▼
+                  reconstructed
+                     bytes
+                         │
+                         ▼
+                  recovered file
+                         │
+                         ▼
+                  size / hash verify
+                         │
+                         ▼
+                    Crypty report
+```
+
+core/
+├── evidence/
+│   ├── evidence_source.cpp
+│   └── ...
+├── filesystem/
+│   ├── ntfs/
+│   │   ├── boot.cpp
+│   │   ├── mft.cpp
+│   │   ├── attributes.cpp
+│   │   ├── data_runs.cpp
+│   │   └── recovery.cpp
+│   ├── fat32/
+│   └── exfat/
+├── platform/
+│   └── windows/
+├── storage/
+│   ├── raw_reader.cpp
+│   └── ...
+└── recovery/
+    └── ...
+
+    Recovery attack plan
+
+1. Handle resident files
+
+Small NTFS files can have their contents stored directly inside the MFT record.
+This is especially important because your tiny deleted test file may be resident.
+We'll preserve those bytes during scanning.
+
+2. Handle non-resident files
+
+Iterate through every DataRun in order.
+Convert:
+LCN × cluster_size
+
+into the physical source offset.
+
+Read each run from the raw NTFS volume.
+Reassemble the file in the correct order.
+Respect the original file size.
+Handle sparse runs correctly.
+
+3. Expose recovery through the native bridge
+
+Something along the lines of:
+
+Python UI
+   ↓
+crypty_workflow_recover_file(index, destination)
+   ↓
+Workflow
+   ↓
+NTFS recovery
+   ↓
+raw reader
+   ↓
+destination file
+
+4. Verify it
+
+The demo shouldn't merely say:
+
+Recovery complete
+
+It should actually produce:
+
+recovered/
+└── test_file.txt
+
+and we verify its size/content.
+
+Scan evidence
+      ↓
+NTFS detector
+      ↓
+969 entries
+      ↓
+deleted test_file.txt
+      ↓
+select row
+      ↓
+Recover Selected ENABLES
+      ↓
+click
+      ↓
+Python backend
+      ↓
+crypty_workflow_recover_ntfs_file()
+      ↓
+NtfsDetector::recover_to()
+      ↓
+recovered/test_file.txt
+
 ## Run the Python Qt UI
+
+delete root dll. run py -3 build_native.py or make to rebuild dll 
+
 
 Install the Python dependency from the repository root:
 
@@ -85,3 +272,58 @@ an executable without the native engine.
 The sanitization language is intentionally framed as procedures designed with
 reference to NIST SP 800-88 Rev. 2; this prototype does not claim certification
 or compliance.
+
+
+## DISTRIBUTION
+For Windows, the simplest route is **PyInstaller**, then optionally wrap the output in an installer such as Inno Setup.
+
+**1. Install packaging tools**
+
+From the folder containing `crypty`:
+
+```powershell
+py -3 -m pip install -r crypty/requirements.txt
+py -3 -m pip install pyinstaller
+```
+
+**2. Build the application**
+
+```powershell
+py -3.13 -m PyInstaller --clean --windowed --name Crypty --icon resources/crypty.ico --add-data "resources;resources" --paths . app/main.py 
+```
+
+The distributable application will be generated under:
+
+```text
+dist/Crypty/
+```
+
+Test it with:
+
+```powershell
+dist/Crypty/Crypty.exe
+```
+
+**Build sequence**
+
+From your project root:
+```
+python build_native.py
+```
+Verify:
+crypty_native.dll
+libwinpthread-1.dll
+
+Then:
+```
+pyinstaller Crypty.spec --clean
+```
+Then:
+dist\Crypty\Crypty.exe
+should launch.
+
+And importantly, inspect:
+dist\Crypty\_internal\
+You should see:
+crypty_native.dll
+libwinpthread-1.dll

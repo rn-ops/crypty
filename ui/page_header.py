@@ -1,35 +1,55 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
+
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 
 
 def create_workspace_header():
+
     header = QFrame()
-    header.setFixedHeight(29)
+    header.setFixedHeight(58)
     header.setObjectName("pageHeader")
     header.setStyleSheet(
-        "QFrame#pageHeader { background: #141a1d; border-bottom: 1px solid #2b363d; }"
+        "QFrame#pageHeader { background: #11191d; border-bottom: 1px solid #2a383e; }"
     )
 
-    header_layout = QHBoxLayout(header)
-    header_layout.setContentsMargins(16, 4, 16, 4)
-    header_layout.setSpacing(8)
+    layout = QHBoxLayout(header)
+    layout.setContentsMargins(18, 5, 18, 5)
+    layout.setSpacing(14)
 
-    title = QLabel("CRYPTY")
-    title.setStyleSheet("font-size: 15px; font-weight: 700; letter-spacing: 0.08em;")
-    header_layout.addWidget(title)
+    # Brand block
+    brand_layout = QVBoxLayout()
+    brand_layout.setSpacing(0)
+    brand_layout.setContentsMargins(0, 0, 0, 0)
 
-    separator = QLabel("/")
-    separator.setStyleSheet("color: #56615e; font-size: 11px;")
-    header_layout.addWidget(separator)
+    brand = QLabel("◇  CRYPTY")
+    brand.setStyleSheet(
+        "color: #e8f4f1; font-size: 17px; font-weight: 700; "
+        "letter-spacing: .14em;"
+    )
+    brand_layout.addWidget(brand)
 
-    workspace = QLabel("Evidence handling workspace")
-    workspace.setStyleSheet("color: #9aa5a1; font-size: 10px; letter-spacing: 0.04em;")
-    header_layout.addWidget(workspace)
+    caption = QLabel("Digital forensics and sanitization workstation")
+    caption.setStyleSheet(
+        "color: #91a5a6; font-size: 9px; letter-spacing: .08em;"
+    )
+    brand_layout.addWidget(caption)
 
-    context = QLabel("Case CRYPTY-001  ·  Investigator session")
-    context.setStyleSheet("color: #9da9a4; font-size: 10px;")
-    context.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    header_layout.addStretch(1)
-    header_layout.addWidget(context)
+    layout.addLayout(brand_layout)
+    layout.addStretch(1)
+
+    case = QLabel("Case  CRYPTY-001")
+    case.setStyleSheet(
+        "background: #172228; border: 1px solid #314148; "
+        "padding: 7px 10px; font-size: 11px;"
+    )
+    layout.addWidget(case)
+
+    readonly = QLabel("Read-Only Mode")
+    readonly.setStyleSheet(
+        "color: #77ded5; background: #123034; "
+        "border: 1px solid #245b5d; padding: 7px 10px; font-size: 11px;"
+    )
+    readonly.setAlignment(Qt.AlignCenter)
+    layout.addWidget(readonly)
 
     return header

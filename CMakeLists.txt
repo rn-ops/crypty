@@ -6,6 +6,7 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 add_library(crypty_core
 	core/src/workflow.cpp
+	core/recovery/fat32_detector.cpp
 	reporting/report.cpp
 )
 target_include_directories(crypty_core PUBLIC core/include reporting)
