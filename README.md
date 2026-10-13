@@ -458,3 +458,36 @@ libwinpthread-1.dll
 - The service URL is displayed from `AuthClient.base_url`.
 - Run the API separately as you do now, then run the desktop app.
 - Test valid credentials, invalid credentials, unavailable API, closing the auth window, and successful transition to the workspace.
+
+
+Move the existing ntfs_detector.cpp, fat32_detector.cpp, and exfat_detector.cpp into their respective recovery modules as you refactor them.
+
+Reserve core/filesystem/ for shared filesystem identification and volume metadata.
+
+Keep OS-specific device access in core/platform/.
+
+Keep the Python facades and the existing single native adapter. The UI should not call individual C++ filesystem implementations directly.
+
+3. What belongs in core/filesystem/?
+The shared layer should answer questions such as:
+- What filesystem is present on this volume?
+- Is the filesystem supported by Crypty?
+- What volume parameters and structural metadata were detected?
+- Was identification successful, inconclusive, or unsupported?
+- What information is available to recovery and sanitization?
+
+Component	Responsibility
+filesystem/detector.cpp	Identify and validate filesystem metadata
+recovery_engine.cpp	Coordinate recovery and select the implementation
+ntfs_recovery.cpp	NTFS-specific scanning and recovery
+mft_parser.cpp	Parse NTFS Master File Table records
+sanitization_engine.cpp	Coordinate sanitization and verification
+native_bridge.cpp	Expose a narrow, stable C ABI
+
+
+Type	Destination	Reason
+ReadAt	core/filesystem/reader.hpp	Shared abstraction for reading bytes at offsets
+DataRun	Keep in workflow.hpp for now	NTFS recovery metadata already consumed by FileEntry
+FileEntry	Keep in workflow.hpp for now	Shared workflow/UI-facing recovery result
+FilesystemInfo	core/filesystem/types.hpp	New shared filesystem identification result
+Filesystem detection functions	core/filesystem/detector.hpp/.cpp	Identify and validate filesystem metadata

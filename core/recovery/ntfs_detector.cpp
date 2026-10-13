@@ -13,6 +13,17 @@
 
 
 /*
+
+Responsibility	                            Existing code	                        Destination
+Read little-endian integers	                u16, u32, u64	                        NTFS parsing utilities, initially
+Identify NTFS boot sector and partition	    ntfs_boot, find_ntfs_partition	        core/filesystem/
+Decode NTFS data runs	                    parse_data_runs	                        NTFS-specific parsing
+Parse names and timestamps                  utf16_name, parse_standard_information	NTFS metadata parsing
+Reconstruct directory paths                 resolve_ntfs_path	                    NTFS recovery/metadata logic
+Read MFT and locate file records	        NtfsDetector::find_entries	            NTFS recovery
+Filter deleted entries	                    find_deleted_entries	                Recovery orchestration or NTFS recovery
+Write recovered file contents	            NtfsDetector::recover_to	            NTFS recovery
+
 namespace crypty::recovery {
 namespace {
 
