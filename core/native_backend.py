@@ -142,6 +142,7 @@ class NativeBackend:
             getattr(library, name).argtypes = [ctypes.c_void_p, ctypes.c_size_t]
             getattr(library, name).restype = ctypes.c_char_p
         library.crypty_device_count.restype = ctypes.c_size_t
+        library.crypty_devices_refresh.restype = None
         for name in (
             "crypty_device_path",
             "crypty_device_name",
@@ -232,6 +233,10 @@ class NativeBackend:
                 }
             )
         return devices
+
+    def refresh_devices(self) -> list[dict]:
+        self._library.crypty_devices_refresh()
+        return self.detect_devices()
 
     @staticmethod
     def _format_capacity(value: int) -> str:

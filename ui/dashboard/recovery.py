@@ -22,6 +22,21 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
+"""
+__init__                  Initialize page state and build the UI.
+_build_ui                 Construct the recovery workspace and its widgets.
+_label                    Create a styled label with an object name.
+_get_selected_device      Retrieve the currently selected media device.
+refresh_device_context    Update device information and reset page state.
+_populate                 Populate the evidence table with scan results.
+_filter                   Filter evidence by filename, type, and status.
+_select_row               Display details for the selected evidence item.
+_scan_evidence            Scan the selected device for filesystem evidence.
+_recover_selected         Validate and recover the selected evidence item.
+_update_action_state      Update action availability based on device and selection.
+_load_hex                 Read and display raw bytes from the selected device.
+_format_hex               Format bytes into hexadecimal and ASCII output.
+"""
 
 class RecoveryPage(QWidget):
     def __init__(self, main_window):
@@ -294,11 +309,11 @@ class RecoveryPage(QWidget):
         widget.setObjectName(name)
         return widget
 
+    def _get_selected_device(self):
+        return self.main_window.device_manager.get_selected_device()
+
     def refresh_device_context(self):
-        device = (
-            self.main_window.device_manager
-            .get_selected_device()
-        )
+        device = self._get_selected_device()
 
         self.breadcrumb.setText(
             f"Media / {device['name']} / "
@@ -514,14 +529,10 @@ class RecoveryPage(QWidget):
 
         self._update_action_state()
 
-
     def _scan_evidence(self):
         self.ready_state.setText("Scanning")
 
-        device = (
-            self.main_window.device_manager
-            .get_selected_device()
-        )
+        device = self._get_selected_device()
 
         filesystem = device.get("filesystem", "").upper()
 
@@ -531,12 +542,14 @@ class RecoveryPage(QWidget):
             "EXFAT": self.main_window.backend.scan_exfat_deleted_files,
         }
 
-        scanner = None
-
-        for name, function in scanners.items():
-            if name in filesystem:
-                scanner = function
-                break
+        scanner = next(
+            (
+                function
+                for name, function in scanners.items()
+                if name in filesystem
+            ),
+            None,
+        )
 
         if scanner is None:
             self.ready_state.setText("Unsupported")
@@ -684,12 +697,8 @@ class RecoveryPage(QWidget):
         finally:
             self._update_action_state()
 
-
     def _update_action_state(self):
-        device = (
-            self.main_window.device_manager
-            .get_selected_device()
-        )
+        device = self._get_selected_device()
 
         has_device = device is not None
 
@@ -750,24 +759,6 @@ class RecoveryPage(QWidget):
                 "Select a traced file with recoverable data"
             )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def _load_hex(self):
         try:
             offset = int(
@@ -777,8 +768,7 @@ class RecoveryPage(QWidget):
 
             data = (
                 self.main_window.backend.read_media(
-                    self.main_window.device_manager
-                    .get_selected_device(),
+                    self._get_selected_device(),
                     offset,
                     10240,
                 )

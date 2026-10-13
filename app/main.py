@@ -5,8 +5,8 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from auth_client import AuthClient
-from ui.login import LoginDialog
-from ui.main_window import CryptyMainWindow
+from ui.auth.login import LoginDialog
+from ui.dashboard.main_window import CryptyMainWindow
 
 
 def resource_path(relative_path: str) -> Path:

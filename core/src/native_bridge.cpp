@@ -88,8 +88,8 @@ std::vector<Device> detect_devices() {
     return devices;
 }
 
-const std::vector<Device>& devices() {
-    static const std::vector<Device> value = detect_devices();
+std::vector<Device>& devices() {
+    static std::vector<Device> value = detect_devices();
     return value;
 }
 
@@ -338,6 +338,8 @@ CRYPTY_API int crypty_workflow_write_report(void* handle, const char* filename) 
 }
 
 CRYPTY_API std::size_t crypty_device_count() { return devices().size(); }
+
+CRYPTY_API void crypty_devices_refresh() { devices() = detect_devices(); }
 
 CRYPTY_API const char* crypty_device_path(std::size_t index) {
     return index >= devices().size() ? empty_string().c_str() : copy_string(devices()[index].path);

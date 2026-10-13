@@ -5,7 +5,7 @@ The desktop frontend is a PySide6 application backed by a portable C++ workflow
 core. The MVP never touches real storage.
 
 
-
+#
 3. Preserve ALL data runs
 
 4. Then deleted-file detection
@@ -262,16 +262,107 @@ an executable without the native engine.
 
 ## Layout
 
-- `core/include/crypty/`: public workflow model and API
-- `core/src/`: media-aware operation state and audit events
-- `reporting/`: report serialization boundary
-- `app/`: Python application bootstrap
-- `ui/`: PySide6 desktop presentation layer
-- `auth/`, `ml/`: reserved and intentionally untouched
-
 The sanitization language is intentionally framed as procedures designed with
 reference to NIST SP 800-88 Rev. 2; this prototype does not claim certification
 or compliance.
+
+The tree below reflects the current repository. `evidence/`, `filesystem/`,
+`platform/`, and a top-level `sanitization/` C++ module are possible future
+modules; they are not present yet.
+
+```text
+Crypty/
+├── app/
+│   └── main.py                     # Desktop application entry point
+├── auth/
+│   └── api/                        # Flask authentication service
+│       ├── app.py                  # HTTP routes and service startup
+│       ├── auth_utils.py           # Authentication helpers
+│       ├── audit.py                # Authentication audit events
+│       ├── rbac.py                 # Role-based access control
+│       ├── face_auth.py            # Face authentication endpoints/helpers
+│       ├── create_first_admin.py   # Initial administrator setup
+│       ├── reset_password.py       # Administrator password reset utility
+│       ├── database/
+│       │   └── db.py               # Authentication database access
+│       ├── models/                 # Face model assets
+│       └── requirements.txt        # Service-specific dependencies
+├── core/
+│   ├── include/crypty/
+│   │   └── workflow.hpp            # Public C++ workflow types and API
+│   ├── recovery/
+│   │   ├── ntfs_detector.cpp       # NTFS scanning and recovery implementation - actually a 1300+ LOC rushed engine
+│   │   ├── ntfs_detector.hpp       # NTFS detector interface
+│   │   ├── fat32_detector.cpp      # FAT32 scanning and recovery implementation
+│   │   ├── fat32_detector.hpp      # FAT32 detector interface
+│   │   ├── exfat_detector.cpp      # exFAT scanning and recovery implementation
+│   │   └── exfat_detector.hpp      # exFAT detector interface
+│   ├── src/
+│   │   ├── native_bridge.cpp       # C ABI called by Python via ctypes
+│   │   └── workflow.cpp            # Workflow state and audit-event implementation
+│   ├── __init__.py
+│   ├── backend.py                 # Simulated/demo backend
+│   ├── device_manager.py          # Detected-device list and selection
+│   ├── native_backend.py          # Python adapter for the native C++ library
+│   ├── recovery_engine.py         # Recovery orchestration facade (currently thin)
+│   └── sanitization_engine.py     # Sanitization orchestration facade (currently thin)
+├── data/
+│   └── demo_data.py                # Sample data for demo behavior
+├── reporting/
+│   ├── report.cpp                  # Native report serialization
+│   └── report.hpp                  # Native report declarations
+├── ui/
+│   ├── auth/
+│   │   ├── auth_window.py          # Full-screen authentication UI
+│   │   ├── login.py                # Login dialog / authentication UI
+│   │   └── saved_accounts.py       # Saved-account UI/storage helpers
+│   ├── dashboard/
+│   │   ├── main_window.py          # Main workspace and page routing
+│   │   ├── shared_elements.py     # Shared dashboard components
+│   │   ├── dashboard.py            # Overview page
+│   │   ├── devices.py              # Device/evidence page
+│   │   ├── recovery.py             # Recovery page and user actions
+│   │   ├── sanitization.py         # Sanitization page and user actions
+│   │   └── reports.py              # Reports and audit pages
+│   └── styles.py                   # Shared Qt styles
+├── __init__.py
+├── auth_client.py                  # Desktop-to-auth-service client
+├── build_native.py                 # Native library build helper
+├── CMakeLists.txt                  # C++ build targets
+├── makefile                        # Common build/run/package commands
+├── Crypty.spec                     # PyInstaller packaging configuration
+├── requirements.txt                # Desktop Python dependencies
+└── README.md
+```
+
+### Python and C++ boundary
+
+The desktop UI and application services are Python. The native library owns
+the C++ workflow state and filesystem-specific scanning/recovery algorithms.
+`core/native_backend.py` declares the native functions with `ctypes`, converts
+Python device data into native calls, and converts native results back into
+Python dictionaries for the UI. `core/src/native_bridge.cpp` is the narrow C
+ABI layer: it accepts C-compatible arguments, calls the C++ workflow or
+detectors, and returns C-compatible results. It should not contain a second
+implementation of recovery policy.
+
+`core/include/crypty/workflow.hpp` defines the workflow model and public C++
+interface; `core/src/workflow.cpp` implements operation state, progress, and
+audit events. The detector files under `core/recovery/` implement filesystem
+specific scanning and recovery. The intended call path is:
+
+```text
+UI page → RecoveryEngine → NativeBackend → native_bridge.cpp
+        → Workflow / filesystem detector → native_bridge.cpp
+        → NativeBackend → UI page
+```
+
+`core/recovery_engine.py` and `core/sanitization_engine.py` are currently thin
+facades that hold a backend reference; they do not yet implement a separate
+workflow. `core/backend.py` supplies a simulated demo backend and is a separate
+backend option, not another implementation inside the native call path. Keep
+business decisions in one layer: Python coordinates UI requests, the bridge
+translates calls, and C++ owns native workflow and filesystem operations.
 
 
 ## DISTRIBUTION
