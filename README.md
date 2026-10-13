@@ -335,6 +335,21 @@ Crypty/
 └── README.md
 ```
 
+```
+Component	Assessment	Recommendation
+ui/	Good separation	Keep
+auth/api/ and auth_client.py	Responsibilities are identifiable	Keep; improve security and integration as needed
+core/native_backend.py	Correct place for the Python–C++ boundary	Keep as the single native adapter
+core/src/native_bridge.cpp	Appropriate C ABI boundary	Keep thin; no duplicate recovery logic
+core/include/crypty/workflow.hpp	Useful public native interface	Keep stable and explicit
+core/src/workflow.cpp	Natural home for native workflow state	Keep; clarify event ownership
+core/recovery/	Good filesystem-specific organization	Keep, refactor the NTFS implementation incrementally
+core/recovery_engine.py	Thin facade today	Keep if it provides a meaningful stable interface
+core/sanitization_engine.py	Thin facade today	Keep, then implement the sanitization workflow
+reporting/	Appropriate existing module	Keep; define how reports consume structured results
+data/demo_data.py	Useful for demo mode	Keep, but visibly label simulated operations
+```
+
 ### Python and C++ boundary
 
 The desktop UI and application services are Python. The native library owns
@@ -418,3 +433,28 @@ dist\Crypty\_internal\
 You should see:
 crypty_native.dll
 libwinpthread-1.dll
+
+# Crypty authentication-window patch
+
+## Included
+- `ui/auth/auth_window.py`: non-modal, single-window authentication UI using `ui/styles.py`
+- `ui/auth/saved_accounts.py`: optional small QSettings helper for saved usernames
+
+## Integrate
+1. Copy `ui/auth/` into your project.
+2. Ensure `ui/auth/__init__.py` and `ui/__init__.py` exist.
+3. In `app/main.py`, import:
+   `from ui.auth.auth_window import AuthWindow`
+   and import the workspace from its new location:
+   `from ui.dashboard.main_window import CryptyMainWindow`
+4. Create one `AuthClient`, create `AuthWindow(client)`, connect:
+   `auth_window.authenticated.connect(open_workspace)`
+   where `open_workspace(session)` creates and shows `CryptyMainWindow(session)`.
+5. This UI intentionally does not implement public registration. Your API currently exposes `/api/admin/register` as admin-only, so enabling account creation requires an authenticated admin session and a corresponding `AuthClient` method.
+6. Saved accounts persist usernames only. No passwords or tokens are stored.
+
+## Notes
+- The window uses the existing `APP_STYLESHEET` and adds narrowly scoped object-name styles.
+- The service URL is displayed from `AuthClient.base_url`.
+- Run the API separately as you do now, then run the desktop app.
+- Test valid credentials, invalid credentials, unavailable API, closing the auth window, and successful transition to the workspace.
