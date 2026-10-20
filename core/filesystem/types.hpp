@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <cstdint>
@@ -23,8 +24,13 @@ struct FilesystemInfo {
     FilesystemType type = FilesystemType::Unknown;
     DetectionStatus status = DetectionStatus::Unknown;
 
+    // Validated geometry. Zero means unavailable.
     std::uint64_t volume_size_bytes = 0;
+    std::uint64_t total_sectors = 0;
+    std::uint64_t cluster_size_bytes = 0;
+
     std::uint32_t sector_size_bytes = 0;
+    std::uint32_t sectors_per_cluster = 0;
 };
 
-}
+} // namespace crypty::filesystem

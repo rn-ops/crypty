@@ -1,8 +1,7 @@
 #include "crypty/workflow.hpp"
 #include "report.hpp"
-#include "../recovery/fat32_detector.hpp"
-#include "../recovery/ntfs_detector.hpp"
-#include "../recovery/exfat_detector.hpp"
+#include "../recovery/recovery_engine.hpp"
+#include "../filesystem/reader.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -390,67 +389,73 @@ CRYPTY_API const char* crypty_workflow_file_method(void* handle, std::size_t ind
 }
 
 
-
-
-
-
 CRYPTY_API std::size_t crypty_workflow_scan_fat32_deleted(void* handle) {
     if (handle == nullptr) return 0;
-    const auto path = workflow(handle)->snapshot().target.path;
-    const auto results = crypty::recovery::Fat32Detector::find_deleted_entries(
-        [&path](std::uint64_t offset, std::uint8_t* output, std::size_t capacity) {
+
+    const auto snapshot = workflow(handle)->snapshot();
+    const auto path = snapshot.target.path;
+
+    const crypty::filesystem::ReadAt read_at =
+        [&path](std::uint64_t offset,
+                std::uint8_t* output,
+                std::size_t capacity) {
             return read_media(path, offset, output, capacity);
-        }
-    );
+        };
+
+    crypty::recovery::RecoveryEngine engine;
+    const auto results = engine.scan(read_at);
+
     workflow(handle)->set_recovery_candidates(results);
     return results.size();
 }
 
-// The source reader remains read-only; only the caller-provided destination is opened for output.
-CRYPTY_API std::uintmax_t crypty_workflow_recover_fat32_file(void* handle, std::size_t index,
-                                                             const char* destination, int* complete) {
+CRYPTY_API std::uintmax_t crypty_workflow_recover_fat32_file(
+    void* handle,
+    std::size_t index,
+    const char* destination,
+    int* complete
+) {
     if (complete != nullptr) *complete = 0;
     if (handle == nullptr || destination == nullptr) return 0;
+
     const auto snapshot = workflow(handle)->snapshot();
     if (index >= snapshot.files.size()) return 0;
-    bool recovered_completely = false;
+
     const auto path = snapshot.target.path;
-    const auto bytes = crypty::recovery::Fat32Detector::recover_to(
-        [&path](std::uint64_t offset, std::uint8_t* output, std::size_t capacity) {
+
+    const crypty::filesystem::ReadAt read_at =
+        [&path](std::uint64_t offset,
+                std::uint8_t* output,
+                std::size_t capacity) {
             return read_media(path, offset, output, capacity);
-        }, snapshot.files[index], destination, recovered_completely
+        };
+
+    crypty::recovery::RecoveryEngine engine;
+    const auto result = engine.recover(
+        read_at, snapshot.files[index], destination
     );
-    if (complete != nullptr) *complete = recovered_completely ? 1 : 0;
-    return bytes;
+
+    if (complete != nullptr) *complete = result.success ? 1 : 0;
+    return static_cast<std::uintmax_t>(result.bytes_recovered);
 }
 
-
-CRYPTY_API std::size_t crypty_workflow_scan_ntfs(
-    void* handle
-) {
+CRYPTY_API std::size_t crypty_workflow_scan_ntfs(void* handle) {
     if (handle == nullptr) return 0;
 
-    const auto path =
-        workflow(handle)->snapshot().target.path;
+    const auto snapshot = workflow(handle)->snapshot();
+    const auto path = snapshot.target.path;
 
-    const auto results =
-        crypty::recovery::NtfsDetector::find_entries(
-            [&path](
-                std::uint64_t offset,
+    const crypty::filesystem::ReadAt read_at =
+        [&path](std::uint64_t offset,
                 std::uint8_t* output,
-                std::size_t capacity
-            ) {
-                return read_media(
-                    path,
-                    offset,
-                    output,
-                    capacity
-                );
-            }
-        );
+                std::size_t capacity) {
+            return read_media(path, offset, output, capacity);
+        };
+
+    crypty::recovery::RecoveryEngine engine;
+    const auto results = engine.scan(read_at);
 
     workflow(handle)->set_recovery_candidates(results);
-
     return results.size();
 }
 
@@ -460,58 +465,29 @@ CRYPTY_API std::uintmax_t crypty_workflow_recover_ntfs_file(
     const char* destination,
     int* complete
 ) {
-    if (complete != nullptr) {
-        *complete = 0;
-    }
+    if (complete != nullptr) *complete = 0;
+    if (handle == nullptr || destination == nullptr) return 0;
 
-    if (
-        handle == nullptr ||
-        destination == nullptr
-    ) {
-        return 0;
-    }
+    const auto snapshot = workflow(handle)->snapshot();
+    if (index >= snapshot.files.size()) return 0;
 
-    const auto snapshot =
-        workflow(handle)->snapshot();
+    const auto path = snapshot.target.path;
 
-    if (index >= snapshot.files.size()) {
-        return 0;
-    }
-
-    bool recovered_completely = false;
-
-    const auto path =
-        snapshot.target.path;
-
-    const auto bytes =
-        crypty::recovery::NtfsDetector::recover_to(
-            [&path](
-                std::uint64_t offset,
+    const crypty::filesystem::ReadAt read_at =
+        [&path](std::uint64_t offset,
                 std::uint8_t* output,
-                std::size_t capacity
-            ) {
-                return read_media(
-                    path,
-                    offset,
-                    output,
-                    capacity
-                );
-            },
-            snapshot.files[index],
-            destination,
-            recovered_completely
-        );
+                std::size_t capacity) {
+            return read_media(path, offset, output, capacity);
+        };
 
-    if (complete != nullptr) {
-        *complete =
-            recovered_completely ? 1 : 0;
-    }
+    crypty::recovery::RecoveryEngine engine;
+    const auto result = engine.recover(
+        read_at, snapshot.files[index], destination
+    );
 
-    return bytes;
+    if (complete != nullptr) *complete = result.success ? 1 : 0;
+    return static_cast<std::uintmax_t>(result.bytes_recovered);
 }
-
-
-
 
 
 // Bounded read-only byte access for the evidence hex viewer.

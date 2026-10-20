@@ -491,3 +491,149 @@ DataRun	Keep in workflow.hpp for now	NTFS recovery metadata already consumed by 
 FileEntry	Keep in workflow.hpp for now	Shared workflow/UI-facing recovery result
 FilesystemInfo	core/filesystem/types.hpp	New shared filesystem identification result
 Filesystem detection functions	core/filesystem/detector.hpp/.cpp	Identify and validate filesystem metadata
+
+
+
+
+
+
+
+
+TESTING for core/filesystem
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build -C Debug --output-on-failure
+
+
+This is for the Recovery part of Crypty.
+```
+Crypty/
+├── app/
+│   └── main.py                     # Desktop application entry point
+├── auth/
+│   └── api/                        # Flask authentication service
+│       ├── app.py                  # HTTP routes and service startup
+│       ├── auth_utils.py           # Authentication helpers
+│       ├── audit.py                # Authentication audit events
+│       ├── rbac.py                 # Role-based access control
+│       ├── face_auth.py            # Face authentication endpoints/helpers
+│       ├── create_first_admin.py   # Initial administrator setup
+│       ├── reset_password.py       # Administrator password reset utility
+│       ├── database/
+│       │   └── db.py               # Authentication database access
+│       ├── models/                 # Face model assets
+│       └── requirements.txt        # Service-specific dependencies
+├── core/
+│   ├── include/crypty/
+│   │   └── workflow.hpp            # Public C++ workflow types and API
+│   ├── filesystem/
+│   │   ├── detector.hpp
+│   │   ├── detector.cpp
+│   │   ├── types.hpp
+│   │   ├── volume_info.hpp
+│   │   └── volume_info.cpp
+│   ├── recovery/
+│   │   ├── recovery_engine.hpp
+│   │   ├── recovery_engine.cpp
+│   │   ├── recovery_types.hpp
+│   │   ├── ntfs/
+│   │   │   ├── ntfs_recovery.hpp
+│   │   │   ├── ntfs_recovery.cpp
+│   │   │   ├── mft_parser.hpp
+│   │   │   ├── mft_parser.cpp
+│   │   │   └── ...
+│   │   ├── fat32/
+│   │   │   ├── fat32_recovery.hpp
+│   │   │   └── fat32_recovery.cpp
+│   │   └── exfat/
+│   |   │   ├── exfat_recovery.hpp
+│   |   │   └── exfat_recovery.cpp
+│   │   ├── ntfs_detector.cpp       # NTFS scanning and recovery implementation - actually a 1300+ LOC rushed engine (needs to be offloaded to core/recovery/ntfs/)
+│   │   ├── ntfs_detector.hpp       # NTFS detector interface
+│   │   ├── fat32_detector.cpp      # FAT32 scanning and recovery implementation
+│   │   ├── fat32_detector.hpp      # FAT32 detector interface
+│   │   ├── exfat_detector.cpp      # exFAT scanning and recovery implementation
+│   │   └── exfat_detector.hpp      # exFAT detector interface
+│   ├── src/
+│   │   ├── native_bridge.cpp       # C ABI called by Python via ctypes
+│   │   └── workflow.cpp            # Workflow state and audit-event implementation
+│   ├── __init__.py
+│   ├── backend.py                 # Simulated/demo backend
+│   ├── device_manager.py          # Detected-device list and selection
+│   ├── native_backend.py          # Python adapter for the native C++ library
+│   ├── recovery_engine.py         # Recovery orchestration facade (currently thin)
+│   └── sanitization_engine.py     # Sanitization orchestration facade (currently thin)
+├── data/
+│   └── demo_data.py                # Sample data for demo behavior
+├── reporting/
+│   ├── report.cpp                  # Native report serialization
+│   └── report.hpp                  # Native report declarations
+├── ui/
+│   ├── auth/
+│   │   ├── auth_window.py          # Full-screen authentication UI
+│   │   ├── login.py                # Login dialog / authentication UI
+│   │   └── saved_accounts.py       # Saved-account UI/storage helpers
+│   ├── dashboard/
+│   │   ├── main_window.py          # Main workspace and page routing
+│   │   ├── shared_elements.py     # Shared dashboard components
+│   │   ├── dashboard.py            # Overview page
+│   │   ├── devices.py              # Device/evidence page
+│   │   ├── recovery.py             # Recovery page and user actions
+│   │   ├── sanitization.py         # Sanitization page and user actions
+│   │   └── reports.py              # Reports and audit pages
+│   └── styles.py                   # Shared Qt styles
+├── __init__.py
+├── auth_client.py                  # Desktop-to-auth-service client
+├── build_native.py                 # Native library build helper
+├── CMakeLists.txt                  # C++ build targets
+├── makefile                        # Common build/run/package commands
+├── Crypty.spec                     # PyInstaller packaging configuration
+├── requirements.txt                # Desktop Python dependencies
+└── README.md
+```
+
+
+reader.hpp
+One canonical ReadAt interface for bounded, read-only access to a source.
+
+
+
+types.hpp
+Filesystem type, detection status, and the result of detection.
+
+
+detector.hpp/.cpp
+Identify and validate a filesystem boot region. Do not enumerate or recover files.
+
+
+volume_info.hpp/.cpp
+Represent validated volume geometry and provide checked calculations for offsets and sizes.
+
+
+testing for filesystem
+ctest --test-dir build -C Debug -R crypty_filesystem --output-on-failure
+
+
+
+RECOVERY REFACTOR
+File	Responsibility
+core/recovery/ntfs/mft_parser.hpp/.cpp	MFT record parsing, record validation, attribute traversal, and extraction of file metadata
+core/recovery/ntfs/ntfs_recovery.hpp/.cpp	NTFS scanning, deleted-entry discovery, path resolution, and file reconstruction
+core/recovery/ntfs_detector.cpp	Legacy implementation temporarily retained during migration, then removed once the replacement works
+
+
+workflow.hpp/.cpp: shared data structures and high-level workflow coordination. Keep FileEntry and DataRun as the shared types; don't duplicate them in NTFS.
+
+
+
+recovery_engine.hpp/.cpp: the recovery entry point and dispatch to the filesystem-specific implementation.
+
+native_bridge.cpp: the Python-facing adapter. It should not parse MFT records, detect filesystem layouts itself, or implement file recovery.
+
+filesystem/detector.cpp: identify the filesystem and return its metadata. It should not recover files.
+
+filesystem/reader.hpp: define the shared read-at-offset abstraction, usable by detection and every recovery module.
+
+recovery/ntfs/: own NTFS record parsing, runlists, scanning and recovery.
+
+recovery/fat32/ and recovery/exfat/: own their respective recovery algorithms.
