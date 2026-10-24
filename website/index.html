@@ -152,6 +152,17 @@
   </main>
 
   <footer class="footer shell"><a class="wordmark" href="#top">CRYPTY<span>®</span></a><span>© 2026 CRYPTY BY AVANT</span><div><a href="#security">SECURITY</a><a href="#contact">CONTACT</a><a href="#top">BACK TO TOP ↑</a></div></footer>
+  <aside class="chat-widget" aria-label="Crypty assistant">
+    <section class="chat-panel" id="chatPanel" aria-labelledby="chatTitle" hidden>
+      <header class="chat-header"><div><span class="chat-status-dot"></span><div><h2 id="chatTitle">Crypty assistant</h2><p>Ask about the platform</p></div></div><button class="chat-close" id="chatClose" type="button" aria-label="Close chat">×</button></header>
+      <div class="chat-messages" id="chatMessages" role="log" aria-live="polite" aria-relevant="additions text">
+        <article class="chat-message bot-message"><span class="message-label">CRYPTY GUIDE</span><p>Hi! Ask me about Crypty’s recovery, sanitization, workflow, or project status.</p></article>
+      </div>
+      <form class="chat-form" id="chatForm"><label class="sr-only" for="chatInput">Message the Crypty assistant</label><textarea id="chatInput" rows="1" maxlength="4000" placeholder="Ask a Crypty question…" required></textarea><button type="submit" aria-label="Send message">↑</button></form>
+      <p class="chat-footnote">AI answers may be incomplete. Don’t share passwords or private data.</p>
+    </section>
+    <button class="chat-launcher" id="chatLauncher" type="button" aria-expanded="false" aria-controls="chatPanel"><span class="chat-launcher-icon" aria-hidden="true">✳</span><span>ASK CRYPTY</span></button>
+  </aside>
   <script src="script.js"></script>
 </body>
 </html>
