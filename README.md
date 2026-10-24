@@ -1,639 +1,282 @@
 # Crypty
 
-Crypty is an integrated digital forensics and data sanitization platform skeleton.
-The desktop frontend is a PySide6 application backed by a portable C++ workflow
-core. The MVP never touches real storage.
+Crypty is an early-stage, Windows-oriented workstation for authorized data
+recovery, digital-forensics workflows, and media sanitization. The product
+goal is a dependable, local-first tool that helps an operator preserve source
+media, recover what remains recoverable, sanitize only explicitly authorized
+targets, and produce reviewable records of what happened.
 
+This repository is a prototype, not a production forensic suite. Some native
+filesystem and recovery code, a Python desktop UI, an authentication service,
+and a static product website exist, but feature completeness, safety controls,
+and recovery results still need systematic validation. Do not use it as the
+sole tool for high-value evidence, and do not promise recovery or sanitization
+outcomes based on the prototype.
 
-#
-3. Preserve ALL data runs
+## Start here
 
-4. Then deleted-file detection
-✅ NTFS boot/partition detection
-✅ MFT enumeration
-✅ $FILE_NAME parsing
-✅ parent MFT references
-✅ reconstructed NTFS paths
-✅ $STANDARD_INFORMATION timestamps
-✅ data-run parsing
-✅ source offsets
-✅ read-only raw-media access
-✅ native → Python → UI pipeline
-⏳ preserve all data runs
-⏳ proper deleted-file detection
-⏳ actual recovery using those runs
-⏳ recovery validation/reporting
-#5 actual recovery
+### Prerequisites
 
-Something like:
+- Windows 10/11
+- Python 3.10 or newer
+- CMake 3.20 or newer and a C++17 compiler for the native core
+- Git
 
-Deleted FileEntry
-       ↓
-MFT metadata
-       ↓
-all data runs
-       ↓
-raw-media reads
-       ↓
-reconstruct bytes in order
-       ↓
-write recovered copy elsewhere
-       ↓
-verify size / hashes
-       ↓
-report
-
-Deleted file
-    ↓
-NTFS MFT record remains
-    ↓
-Crypty reads the MFT
-    ↓
-Detects inactive FILE record
-    ↓
-Extracts filename
-    ↓
-Extracts metadata/timestamps
-    ↓
-Preserves data runs
-    ↓
-FileEntry.deleted = true
-    ↓
-C++ → native bridge → Python
-    ↓
-UI displays "Traced"
-    ↓
-UI search finds it
-
-```
-recovery pipeline
-                    DELETED FILE
-                         │
-                         ▼
-                  FileEntry
-                         │
-                  ┌──────┴──────┐
-                  │             │
-             resident       non-resident
-               data            data runs
-                  │             │
-                  └──────┬──────┘
-                         ▼
-                  raw media reads
-                         │
-                         ▼
-                  reconstructed
-                     bytes
-                         │
-                         ▼
-                  recovered file
-                         │
-                         ▼
-                  size / hash verify
-                         │
-                         ▼
-                    Crypty report
-```
-
-core/
-├── evidence/
-│   ├── evidence_source.cpp
-│   └── ...
-├── filesystem/
-│   ├── ntfs/
-│   │   ├── boot.cpp
-│   │   ├── mft.cpp
-│   │   ├── attributes.cpp
-│   │   ├── data_runs.cpp
-│   │   └── recovery.cpp
-│   ├── fat32/
-│   └── exfat/
-├── platform/
-│   └── windows/
-├── storage/
-│   ├── raw_reader.cpp
-│   └── ...
-└── recovery/
-    └── ...
-
-    Recovery attack plan
-
-1. Handle resident files
-
-Small NTFS files can have their contents stored directly inside the MFT record.
-This is especially important because your tiny deleted test file may be resident.
-We'll preserve those bytes during scanning.
-
-2. Handle non-resident files
-
-Iterate through every DataRun in order.
-Convert:
-LCN × cluster_size
-
-into the physical source offset.
-
-Read each run from the raw NTFS volume.
-Reassemble the file in the correct order.
-Respect the original file size.
-Handle sparse runs correctly.
-
-3. Expose recovery through the native bridge
-
-Something along the lines of:
-
-Python UI
-   ↓
-crypty_workflow_recover_file(index, destination)
-   ↓
-Workflow
-   ↓
-NTFS recovery
-   ↓
-raw reader
-   ↓
-destination file
-
-4. Verify it
-
-The demo shouldn't merely say:
-
-Recovery complete
-
-It should actually produce:
-
-recovered/
-└── test_file.txt
-
-and we verify its size/content.
-
-Scan evidence
-      ↓
-NTFS detector
-      ↓
-969 entries
-      ↓
-deleted test_file.txt
-      ↓
-select row
-      ↓
-Recover Selected ENABLES
-      ↓
-click
-      ↓
-Python backend
-      ↓
-crypty_workflow_recover_ntfs_file()
-      ↓
-NtfsDetector::recover_to()
-      ↓
-recovered/test_file.txt
-
-## Run the Python Qt UI
-
-delete root dll. run py -3 build_native.py or make to rebuild dll 
-
-
-Install the Python dependency from the repository root:
+The desktop UI and native core are separate components. Install Python
+dependencies from the repository root:
 
 ```powershell
-python -m pip install -r requirements.txt
+py -3 -m pip install -r requirements.txt
 ```
 
-The desktop UI authenticates against the Flask service in `auth/api`. Install
-its dependencies and create the first admin account once:
+Build the C++ libraries and run the native tests:
 
 ```powershell
-py -3 -m pip install -r auth\api\requirements.txt
-cd auth\api
-py -3 create_first_admin.py admin1 "choose-a-strong-password"
-py -3 app.py
-```
-
-`create_first_admin.py` only creates a new account. If `admin1` already exists,
-reset its password explicitly:
-
-```powershell
-py -3 reset_password.py admin1 "choose-a-strong-password"
-```
-
-Leave that service running on `http://127.0.0.1:5000`, open a second terminal,
-and launch the desktop UI from the directory containing the `crypty` package:
-
-Run the UI from the directory containing the `crypty` package:
-
-```powershell
-python -m crypty.app.main
-```
-
-Set `CRYPTY_AUTH_URL` if the authentication service runs elsewhere.
-
-From this repository directory, use the makefile shortcut:
-
-```powershell
-make run
-```
-
-## CMake build
-
-```sh
 cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The CMake build compiles the portable `crypty_core` library and exposes a
-`crypty_native` library for the Python UI plus a `crypty_ui` target that
-launches the Python Qt application. Build `crypty_native` before starting the
-UI.
-
-For a MinGW build, place any required runtime DLLs beside `crypty_native.dll`
-before packaging. The PyInstaller spec automatically includes
-`libwinpthread-1.dll` when it is present.
-
-With MinGW installed, build the native bridge and package the app with:
+The UI uses the authentication service in `auth/api`. Install its dependencies
+and create the first local admin account from the repository root:
 
 ```powershell
-py -3 build_native.py
-py -3 -m PyInstaller --clean --noconfirm Crypty.spec
+py -3 -m pip install -r auth\api\requirements.txt
+py -3 auth\api\create_first_admin.py admin1 "choose-a-strong-password"
 ```
 
-Or use `make package`. The spec stops with a clear error instead of producing
-an executable without the native engine.
-
-## Layout
-
-The sanitization language is intentionally framed as procedures designed with
-reference to NIST SP 800-88 Rev. 2; this prototype does not claim certification
-or compliance.
-
-The tree below reflects the current repository. `evidence/`, `filesystem/`,
-`platform/`, and a top-level `sanitization/` C++ module are possible future
-modules; they are not present yet.
-
-```text
-Crypty/
-├── app/
-│   └── main.py                     # Desktop application entry point
-├── auth/
-│   └── api/                        # Flask authentication service
-│       ├── app.py                  # HTTP routes and service startup
-│       ├── auth_utils.py           # Authentication helpers
-│       ├── audit.py                # Authentication audit events
-│       ├── rbac.py                 # Role-based access control
-│       ├── face_auth.py            # Face authentication endpoints/helpers
-│       ├── create_first_admin.py   # Initial administrator setup
-│       ├── reset_password.py       # Administrator password reset utility
-│       ├── database/
-│       │   └── db.py               # Authentication database access
-│       ├── models/                 # Face model assets
-│       └── requirements.txt        # Service-specific dependencies
-├── core/
-│   ├── include/crypty/
-│   │   └── workflow.hpp            # Public C++ workflow types and API
-│   ├── recovery/
-│   │   ├── ntfs_detector.cpp       # NTFS scanning and recovery implementation - actually a 1300+ LOC rushed engine
-│   │   ├── ntfs_detector.hpp       # NTFS detector interface
-│   │   ├── fat32_detector.cpp      # FAT32 scanning and recovery implementation
-│   │   ├── fat32_detector.hpp      # FAT32 detector interface
-│   │   ├── exfat_detector.cpp      # exFAT scanning and recovery implementation
-│   │   └── exfat_detector.hpp      # exFAT detector interface
-│   ├── src/
-│   │   ├── native_bridge.cpp       # C ABI called by Python via ctypes
-│   │   └── workflow.cpp            # Workflow state and audit-event implementation
-│   ├── __init__.py
-│   ├── backend.py                 # Simulated/demo backend
-│   ├── device_manager.py          # Detected-device list and selection
-│   ├── native_backend.py          # Python adapter for the native C++ library
-│   ├── recovery_engine.py         # Recovery orchestration facade (currently thin)
-│   └── sanitization_engine.py     # Sanitization orchestration facade (currently thin)
-├── data/
-│   └── demo_data.py                # Sample data for demo behavior
-├── reporting/
-│   ├── report.cpp                  # Native report serialization
-│   └── report.hpp                  # Native report declarations
-├── ui/
-│   ├── auth/
-│   │   ├── auth_window.py          # Full-screen authentication UI
-│   │   ├── login.py                # Login dialog / authentication UI
-│   │   └── saved_accounts.py       # Saved-account UI/storage helpers
-│   ├── dashboard/
-│   │   ├── main_window.py          # Main workspace and page routing
-│   │   ├── shared_elements.py     # Shared dashboard components
-│   │   ├── dashboard.py            # Overview page
-│   │   ├── devices.py              # Device/evidence page
-│   │   ├── recovery.py             # Recovery page and user actions
-│   │   ├── sanitization.py         # Sanitization page and user actions
-│   │   └── reports.py              # Reports and audit pages
-│   └── styles.py                   # Shared Qt styles
-├── __init__.py
-├── auth_client.py                  # Desktop-to-auth-service client
-├── build_native.py                 # Native library build helper
-├── CMakeLists.txt                  # C++ build targets
-├── makefile                        # Common build/run/package commands
-├── Crypty.spec                     # PyInstaller packaging configuration
-├── requirements.txt                # Desktop Python dependencies
-└── README.md
-```
-
-```
-Component	Assessment	Recommendation
-ui/	Good separation	Keep
-auth/api/ and auth_client.py	Responsibilities are identifiable	Keep; improve security and integration as needed
-core/native_backend.py	Correct place for the Python–C++ boundary	Keep as the single native adapter
-core/src/native_bridge.cpp	Appropriate C ABI boundary	Keep thin; no duplicate recovery logic
-core/include/crypty/workflow.hpp	Useful public native interface	Keep stable and explicit
-core/src/workflow.cpp	Natural home for native workflow state	Keep; clarify event ownership
-core/recovery/	Good filesystem-specific organization	Keep, refactor the NTFS implementation incrementally
-core/recovery_engine.py	Thin facade today	Keep if it provides a meaningful stable interface
-core/sanitization_engine.py	Thin facade today	Keep, then implement the sanitization workflow
-reporting/	Appropriate existing module	Keep; define how reports consume structured results
-data/demo_data.py	Useful for demo mode	Keep, but visibly label simulated operations
-```
-
-### Python and C++ boundary
-
-The desktop UI and application services are Python. The native library owns
-the C++ workflow state and filesystem-specific scanning/recovery algorithms.
-`core/native_backend.py` declares the native functions with `ctypes`, converts
-Python device data into native calls, and converts native results back into
-Python dictionaries for the UI. `core/src/native_bridge.cpp` is the narrow C
-ABI layer: it accepts C-compatible arguments, calls the C++ workflow or
-detectors, and returns C-compatible results. It should not contain a second
-implementation of recovery policy.
-
-`core/include/crypty/workflow.hpp` defines the workflow model and public C++
-interface; `core/src/workflow.cpp` implements operation state, progress, and
-audit events. The detector files under `core/recovery/` implement filesystem
-specific scanning and recovery. The intended call path is:
-
-```text
-UI page → RecoveryEngine → NativeBackend → native_bridge.cpp
-        → Workflow / filesystem detector → native_bridge.cpp
-        → NativeBackend → UI page
-```
-
-`core/recovery_engine.py` and `core/sanitization_engine.py` are currently thin
-facades that hold a backend reference; they do not yet implement a separate
-workflow. `core/backend.py` supplies a simulated demo backend and is a separate
-backend option, not another implementation inside the native call path. Keep
-business decisions in one layer: Python coordinates UI requests, the bridge
-translates calls, and C++ owns native workflow and filesystem operations.
-
-
-## DISTRIBUTION
-For Windows, the simplest route is **PyInstaller**, then optionally wrap the output in an installer such as Inno Setup.
-
-**1. Install packaging tools**
-
-From the folder containing `crypty`:
+Then start the service in a terminal:
 
 ```powershell
-py -3 -m pip install -r crypty/requirements.txt
-py -3 -m pip install pyinstaller
+py -3 auth\api\app.py
 ```
 
-**2. Build the application**
+The service defaults to `http://127.0.0.1:5000`; set `CRYPTY_AUTH_URL` if your
+development service uses another address. Do not expose the development
+service publicly or treat its current authentication setup as production
+deployment guidance.
+
+With the authentication service running, launch the desktop UI from another
+terminal at the repository root:
 
 ```powershell
-py -3.13 -m PyInstaller --clean --windowed --name Crypty --icon resources/crypty.ico --add-data "resources;resources" --paths . app/main.py 
+py -3 -m app.main
 ```
 
-The distributable application will be generated under:
+### Website
 
-```text
-dist/Crypty/
-```
+The website is a static concept/marketing page. Its contact/interest form is
+demo-only and does not submit or store data. The chat is an optional local
+Python service; setup and limitations are in [`website/README.txt`](website/README.txt).
+Do not advertise the page's mock dashboard, plans, or architecture diagrams
+as released product capabilities.
 
-Test it with:
+## Product principles
 
-```powershell
-dist/Crypty/Crypty.exe
-```
+1. **Preserve first.** Recovery analysis must not write to source evidence.
+   Acquire or select a verified image where possible; otherwise use a
+   demonstrably read-only source path. Write recovered output to a separate
+   destination.
+2. **Make risk explicit.** Show the selected device identity, operation,
+   destination, and consequences before any destructive action. Recovery and
+   sanitization must be separate workflows with separate permissions and
+   confirmations.
+3. **Record enough to review.** Persist operation start, target identity,
+   configuration, progress, warnings, result, verification, and operator
+   actions. Keep raw recovered content out of routine audit records.
+4. **Report limitations honestly.** Recovery depends on filesystem state,
+   overwritten sectors, TRIM, flash translation layers, device health, and
+   media type. Sanitization assurance also depends on the device and method;
+   a successful software write is not proof that every physical cell was
+   erased.
+5. **Local-first and least privilege.** Device data stays local by default.
+   Network services should receive only the minimum metadata required for
+   their purpose.
 
-**Build sequence**
+## Current shape of the code
 
-From your project root:
-```
-python build_native.py
-```
-Verify:
-crypty_native.dll
-libwinpthread-1.dll
+- `app/` and `ui/`: PySide6 desktop entry point, authentication screens, and
+  workspace pages.
+- `core/`: Python orchestration/adapters and the C++ workflow, filesystem,
+  storage, recovery, reporting, and sanitization modules.
+- `core/native_backend.py` and `core/src/native_bridge.cpp`: Python-to-native
+  boundary. Keep it narrow and typed; avoid implementing product policy in
+  both languages.
+- `auth/`: separate Flask authentication API, its database/models, and
+  development utilities.
+- `tests/`: C++ workflow, filesystem-detection, and FAT32 recovery tests.
+- `website/`: static landing page and an optional local chat server.
+- `data/`: demo data. Clearly label simulated output wherever it appears.
 
-Then:
-```
-pyinstaller Crypty.spec --clean
-```
-Then:
-dist\Crypty\Crypty.exe
-should launch.
+The Python recovery and sanitization engine classes are currently thin
+facades. The presence of a UI page or native source file does not by itself
+mean an end-to-end, production-safe workflow exists. Keep the native core
+portable where practical, and put operating-system-specific device access
+behind explicit platform adapters.
 
-And importantly, inspect:
-dist\Crypty\_internal\
-You should see:
-crypty_native.dll
-libwinpthread-1.dll
+## Core MVP roadmap
 
-# Crypty authentication-window patch
+Treat each phase as a release gate: do not move destructive operations into
+real-device workflows before the preceding safety, testing, and audit gates
+are met.
 
-## Included
-- `ui/auth/auth_window.py`: non-modal, single-window authentication UI using `ui/styles.py`
-- `ui/auth/saved_accounts.py`: optional small QSettings helper for saved usernames
+### 1. Define and freeze the MVP contract
 
-## Integrate
-1. Copy `ui/auth/` into your project.
-2. Ensure `ui/auth/__init__.py` and `ui/__init__.py` exist.
-3. In `app/main.py`, import:
-   `from ui.auth.auth_window import AuthWindow`
-   and import the workspace from its new location:
-   `from ui.dashboard.main_window import CryptyMainWindow`
-4. Create one `AuthClient`, create `AuthWindow(client)`, connect:
-   `auth_window.authenticated.connect(open_workspace)`
-   where `open_workspace(session)` creates and shows `CryptyMainWindow(session)`.
-5. This UI intentionally does not implement public registration. Your API currently exposes `/api/admin/register` as admin-only, so enabling account creation requires an authenticated admin session and a corresponding `AuthClient` method.
-6. Saved accounts persist usernames only. No passwords or tokens are stored.
+- Specify supported Windows versions, filesystems, device types, and
+  operation modes.
+- Decide what the first release will explicitly not support (for example,
+  RAID, encrypted volumes without keys, damaged hardware, or guaranteed SSD
+  recovery).
+- Document operator authorization, privacy/data retention, and incident
+  handling expectations.
+- Create a feature matrix that labels each capability as implemented,
+  experimental, simulated, or planned.
 
-## Notes
-- The window uses the existing `APP_STYLESHEET` and adds narrowly scoped object-name styles.
-- The service URL is displayed from `AuthClient.base_url`.
-- Run the API separately as you do now, then run the desktop app.
-- Test valid credentials, invalid credentials, unavailable API, closing the auth window, and successful transition to the workspace.
+**Done when:** product scope and claims are testable and match the code.
 
+### 2. Make evidence acquisition safe and repeatable
 
-Move the existing ntfs_detector.cpp, fat32_detector.cpp, and exfat_detector.cpp into their respective recovery modules as you refactor them.
+- Implement reliable device identification and stable source handles.
+- Default evidence access to read-only; make read/write state visible and
+  fail closed if the requested protection cannot be established.
+- Add image acquisition to a separate destination, with source/image size,
+  timestamps, errors, and cryptographic hashes recorded.
+- Reopen and verify acquired images before analysis; never recover files back
+  onto the source.
+- Test against disposable images and virtual disks before physical media.
 
-Reserve core/filesystem/ for shared filesystem identification and volume metadata.
+**Done when:** tests prove analysis does not modify source bytes, and image
+hashes and errors are reproducible.
 
-Keep OS-specific device access in core/platform/.
+### 3. Deliver a bounded recovery workflow
 
-Keep the Python facades and the existing single native adapter. The UI should not call individual C++ filesystem implementations directly.
+- Establish small, known-good image fixtures for each supported filesystem.
+- Validate detection, metadata parsing, deleted-entry identification, and
+  file reconstruction independently.
+- Handle resident data, fragmented extents, sparse regions, partial reads,
+  malformed metadata, path collisions, and interrupted operations.
+- Write output only to a user-selected destination; verify reconstructed size
+  and hash where possible and label partial/uncertain results.
+- Add progress, cancellation, safe error reporting, and testable confidence
+  reasons rather than presenting a score without evidence.
 
-3. What belongs in core/filesystem/?
-The shared layer should answer questions such as:
-- What filesystem is present on this volume?
-- Is the filesystem supported by Crypty?
-- What volume parameters and structural metadata were detected?
-- Was identification successful, inconclusive, or unsupported?
-- What information is available to recovery and sanitization?
+**Done when:** automated tests cover normal, damaged, truncated, and
+interrupted cases and compare output against known fixture hashes.
 
-Component	Responsibility
-filesystem/detector.cpp	Identify and validate filesystem metadata
-recovery_engine.cpp	Coordinate recovery and select the implementation
-ntfs_recovery.cpp	NTFS-specific scanning and recovery
-mft_parser.cpp	Parse NTFS Master File Table records
-sanitization_engine.cpp	Coordinate sanitization and verification
-native_bridge.cpp	Expose a narrow, stable C ABI
+### 4. Add a durable operation ledger
 
+- Use structured operation records/events with stable IDs, timestamps,
+  actor, target fingerprint, operation/configuration, outcome, and
+  verification fields.
+- Persist locally before showing an operation as complete. Handle disk-full,
+  process crash, clock issues, and interrupted writes explicitly.
+- Export a human-readable report plus machine-readable data; include schema
+  version and hashes for the report/evidence image where appropriate.
+- Add search/filtering and retention controls. Protect sensitive paths and
+  personal data in logs.
 
-Type	Destination	Reason
-ReadAt	core/filesystem/reader.hpp	Shared abstraction for reading bytes at offsets
-DataRun	Keep in workflow.hpp for now	NTFS recovery metadata already consumed by FileEntry
-FileEntry	Keep in workflow.hpp for now	Shared workflow/UI-facing recovery result
-FilesystemInfo	core/filesystem/types.hpp	New shared filesystem identification result
-Filesystem detection functions	core/filesystem/detector.hpp/.cpp	Identify and validate filesystem metadata
+**Done when:** an operator can reconstruct who did what, to which target,
+with what settings and result, including failed/interrupted runs.
 
+### 5. Implement sanitization only after safety review
 
+- Begin with a **simulation/planning mode** that identifies the target,
+  evaluates the device and available methods, and produces a preview without
+  modifying media.
+- For real execution, require explicit authorization, strong target
+  re-identification, a separate destructive-action permission, and a
+  deliberate confirmation that cannot be triggered by the recovery workflow.
+- Use an appropriate, documented device/platform method and verify/report
+  its result. Clearly state when verification is unavailable or limited.
+- Base method selection and claims on current recognized guidance (including
+  NIST SP 800-88 Rev. 2 where applicable), device documentation, and expert
+  review. Do not invent universal overwrite-pass guarantees.
+- Keep sanitization disabled on unsupported or ambiguous devices; retain
+  operation evidence without claiming certification.
 
+**Done when:** misuse tests prove the wrong device cannot be silently erased,
+the operation is auditable, and the report states exactly what was and was
+not verified.
 
+### 6. Harden, package, and support the desktop workstation
 
+- Centralize configuration, logging, error types, and version reporting.
+- Add dependency pinning/lock strategy, reproducible builds, signed release
+  artifacts, and update/rollback procedures.
+- Test fresh install, least-privilege use, recovery from crashes, multiple
+  display/DPI settings, and supported Windows/device combinations.
+- Remove development auth bypasses and secrets from distributable builds;
+  review authentication, authorization, local database protection, and
+  session expiry before any external pilot.
+- Add operator help, safety checklists, release notes, and a support/bug
+  report path.
 
+**Done when:** another team member can install, validate, and use a release
+from documented steps without developer-only setup.
 
+### 7. Make the website launch-ready
 
-TESTING for core/filesystem
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build -C Debug --output-on-failure
+- Replace mock product metrics and simulated workflow imagery with clearly
+  labeled product screenshots or architecture illustrations.
+- Publish an accurate support/filesystem matrix, limitations, data handling
+  and privacy policy, security contact, version/status, and safety
+  disclaimers.
+- Either wire the interest form to a consent-aware backend with spam
+  protection and privacy notice, or keep it explicitly marked as a demo.
+- Treat pricing, waitlist, team audit console, licensing, and centralized
+  services as proposals until they exist; avoid implying they are available.
+- Keep the optional chatbot isolated from forensic data, avoid collecting
+  secrets/evidence, and provide a clear non-AI support route.
+- Add accessible mobile layouts, metadata/SEO, analytics only with an
+  appropriate privacy approach, and automated checks for links/forms.
 
+**Done when:** every public claim maps to a tested capability or is visibly
+marked as planned/conceptual.
 
-This is for the Recovery part of Crypty.
-```
-Crypty/
-├── app/
-│   └── main.py                     # Desktop application entry point
-├── auth/
-│   └── api/                        # Flask authentication service
-│       ├── app.py                  # HTTP routes and service startup
-│       ├── auth_utils.py           # Authentication helpers
-│       ├── audit.py                # Authentication audit events
-│       ├── rbac.py                 # Role-based access control
-│       ├── face_auth.py            # Face authentication endpoints/helpers
-│       ├── create_first_admin.py   # Initial administrator setup
-│       ├── reset_password.py       # Administrator password reset utility
-│       ├── database/
-│       │   └── db.py               # Authentication database access
-│       ├── models/                 # Face model assets
-│       └── requirements.txt        # Service-specific dependencies
-├── core/
-│   ├── include/crypty/
-│   │   └── workflow.hpp            # Public C++ workflow types and API
-│   ├── filesystem/
-│   │   ├── detector.hpp
-│   │   ├── detector.cpp
-│   │   ├── types.hpp
-│   │   ├── volume_info.hpp
-│   │   └── volume_info.cpp
-│   ├── recovery/
-│   │   ├── recovery_engine.hpp
-│   │   ├── recovery_engine.cpp
-│   │   ├── recovery_types.hpp
-│   │   ├── ntfs/
-│   │   │   ├── ntfs_recovery.hpp
-│   │   │   ├── ntfs_recovery.cpp
-│   │   │   ├── mft_parser.hpp
-│   │   │   ├── mft_parser.cpp
-│   │   │   └── ...
-│   │   ├── fat32/
-│   │   │   ├── fat32_recovery.hpp
-│   │   │   └── fat32_recovery.cpp
-│   │   └── exfat/
-│   |   │   ├── exfat_recovery.hpp
-│   |   │   └── exfat_recovery.cpp
-│   │   ├── ntfs_detector.cpp       # NTFS scanning and recovery implementation - actually a 1300+ LOC rushed engine (needs to be offloaded to core/recovery/ntfs/)
-│   │   ├── ntfs_detector.hpp       # NTFS detector interface
-│   │   ├── fat32_detector.cpp      # FAT32 scanning and recovery implementation
-│   │   ├── fat32_detector.hpp      # FAT32 detector interface
-│   │   ├── exfat_detector.cpp      # exFAT scanning and recovery implementation
-│   │   └── exfat_detector.hpp      # exFAT detector interface
-│   ├── src/
-│   │   ├── native_bridge.cpp       # C ABI called by Python via ctypes
-│   │   └── workflow.cpp            # Workflow state and audit-event implementation
-│   ├── __init__.py
-│   ├── backend.py                 # Simulated/demo backend
-│   ├── device_manager.py          # Detected-device list and selection
-│   ├── native_backend.py          # Python adapter for the native C++ library
-│   ├── recovery_engine.py         # Recovery orchestration facade (currently thin)
-│   └── sanitization_engine.py     # Sanitization orchestration facade (currently thin)
-├── data/
-│   └── demo_data.py                # Sample data for demo behavior
-├── reporting/
-│   ├── report.cpp                  # Native report serialization
-│   └── report.hpp                  # Native report declarations
-├── ui/
-│   ├── auth/
-│   │   ├── auth_window.py          # Full-screen authentication UI
-│   │   ├── login.py                # Login dialog / authentication UI
-│   │   └── saved_accounts.py       # Saved-account UI/storage helpers
-│   ├── dashboard/
-│   │   ├── main_window.py          # Main workspace and page routing
-│   │   ├── shared_elements.py     # Shared dashboard components
-│   │   ├── dashboard.py            # Overview page
-│   │   ├── devices.py              # Device/evidence page
-│   │   ├── recovery.py             # Recovery page and user actions
-│   │   ├── sanitization.py         # Sanitization page and user actions
-│   │   └── reports.py              # Reports and audit pages
-│   └── styles.py                   # Shared Qt styles
-├── __init__.py
-├── auth_client.py                  # Desktop-to-auth-service client
-├── build_native.py                 # Native library build helper
-├── CMakeLists.txt                  # C++ build targets
-├── makefile                        # Common build/run/package commands
-├── Crypty.spec                     # PyInstaller packaging configuration
-├── requirements.txt                # Desktop Python dependencies
-└── README.md
-```
+## Architecture and maintainability decisions
 
+### Keep modules organized around responsibilities
 
-reader.hpp
-One canonical ReadAt interface for bounded, read-only access to a source.
+Use explicit boundaries: UI → application use case → domain types/policy →
+platform/storage adapter → filesystem implementation. Keep report rendering,
+authentication, website concerns, and device I/O out of filesystem parsers.
+Prefer small typed interfaces and structured results to generic dictionaries
+crossing the Python/C++ boundary. Avoid a large rewrite; extract seams while
+adding tested behavior.
 
+### Use an event ledger, not event sourcing everywhere
 
+An event-based audit trail is worthwhile for forensic accountability, but a
+general event bus or full event-sourced architecture is likely unnecessary
+for the MVP. Start with explicit operation commands that append structured,
+durable audit events and update a simple current-operation state. Keep event
+creation in the application/use-case boundary; let UI progress subscribe to
+notifications without becoming the source of truth. Add an outbox/central
+sync later only if offline team workflows require it.
 
-types.hpp
-Filesystem type, detection status, and the result of detection.
+### Testing and delivery discipline
 
+- Make deterministic image fixtures the core test assets; never use a user's
+  live disk as a routine test.
+- Add Python unit/integration tests alongside the existing C++ tests.
+- Require tests, static analysis, and a clean build in CI for pull requests.
+- Review every hardware-facing change for read/write behavior, cancellation,
+  permissions, error paths, and audit coverage.
+- Keep security-sensitive decisions documented and get qualified review
+  before real sanitization or evidence-handling claims.
 
-detector.hpp/.cpp
-Identify and validate a filesystem boot region. Do not enumerate or recover files.
+## Contributing
 
+1. Open an issue or small design note describing the user impact, supported
+   target, safety implications, and acceptance tests.
+2. Keep changes focused; add or update deterministic tests and relevant
+   operator documentation.
+3. Run the CMake build and CTest suite. Include the exact commands and
+   results in the pull request; include Python/UI checks when those areas
+   change.
+4. Do not include real evidence, credentials, customer data, or generated
+   forensic artifacts in commits or issue attachments.
 
-volume_info.hpp/.cpp
-Represent validated volume geometry and provide checked calculations for offsets and sizes.
-
-
-testing for filesystem
-ctest --test-dir build -C Debug -R crypty_filesystem --output-on-failure
-
-
-
-RECOVERY REFACTOR
-File	Responsibility
-core/recovery/ntfs/mft_parser.hpp/.cpp	MFT record parsing, record validation, attribute traversal, and extraction of file metadata
-core/recovery/ntfs/ntfs_recovery.hpp/.cpp	NTFS scanning, deleted-entry discovery, path resolution, and file reconstruction
-core/recovery/ntfs_detector.cpp	Legacy implementation temporarily retained during migration, then removed once the replacement works
-
-
-workflow.hpp/.cpp: shared data structures and high-level workflow coordination. Keep FileEntry and DataRun as the shared types; don't duplicate them in NTFS.
-
-
-
-recovery_engine.hpp/.cpp: the recovery entry point and dispatch to the filesystem-specific implementation.
-
-native_bridge.cpp: the Python-facing adapter. It should not parse MFT records, detect filesystem layouts itself, or implement file recovery.
-
-filesystem/detector.cpp: identify the filesystem and return its metadata. It should not recover files.
-
-filesystem/reader.hpp: define the shared read-at-offset abstraction, usable by detection and every recovery module.
-
-recovery/ntfs/: own NTFS record parsing, runlists, scanning and recovery.
-
-recovery/fat32/ and recovery/exfat/: own their respective recovery algorithms.
+For an initial contribution, start with test fixtures, clear error handling,
+read-only guarantees, report schemas, or documentation rather than enabling
+real-device sanitization.
