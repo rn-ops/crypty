@@ -13,7 +13,7 @@ CONTEXT_FILES = (
     "README.md",
     "website/README.txt",
     "website/index.html",
-    "core/include/crypty/workflow.hpp",
+    "core/src/workflow.hpp",
     "core/src/workflow.cpp",
     "core/reporting/report.hpp",
     "core/reporting/report.cpp",
@@ -154,5 +154,4 @@ def answer_question(question, history=(), opener=urlopen):
     except json.JSONDecodeError as error:
         raise RuntimeError("xAI returned an unreadable response.") from error
     return extract_text(payload)
-
 

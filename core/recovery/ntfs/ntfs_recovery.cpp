@@ -3,12 +3,13 @@
 #include "data_attribute.hpp"
 #include "runlist.hpp"
 
-#include "../../filesystem/reader.hpp"
-#include "../../include/crypty/workflow.hpp"
+#include "../../reader.hpp"
+#include "../../src/workflow.hpp"
 
 #include <algorithm>
 #include <cstddef>  
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <utility>
@@ -242,6 +243,74 @@ bool read_mft_bytes(
 }
 
 } // namespace
+
+bool locate_ntfs_volume(
+    const ReadAt& read_at,
+    NtfsVolumeInfo& result
+) {
+    result = {};
+    std::vector<std::uint8_t> boot(512);
+    if (!read_exact(read_at, 0, boot.data(), boot.size()) ||
+        std::memcmp(boot.data() + 3, "NTFS    ", 8) != 0) {
+        return false;
+    }
+
+    const auto bytes_per_sector = u16(boot, 11);
+    const auto sectors_per_cluster = boot[13];
+    const auto total_sectors = u64(boot, 40);
+    const auto mft_lcn = u64(boot, 48);
+    const int record_size_code =
+        boot[64] < 0x80 ? boot[64] : static_cast<int>(boot[64]) - 256;
+
+    if (bytes_per_sector < 512 || bytes_per_sector > 4096 ||
+        (bytes_per_sector & (bytes_per_sector - 1)) != 0 ||
+        sectors_per_cluster == 0 ||
+        (sectors_per_cluster & (sectors_per_cluster - 1)) != 0 ||
+        record_size_code == 0 || total_sectors == 0) {
+        return false;
+    }
+
+    std::uint64_t cluster_size = 0;
+    std::uint64_t volume_size = 0;
+    std::uint64_t mft_offset = 0;
+    if (!mul_u64(bytes_per_sector, sectors_per_cluster, cluster_size) ||
+        !mul_u64(total_sectors, bytes_per_sector, volume_size) ||
+        !mul_u64(mft_lcn, cluster_size, mft_offset) ||
+        cluster_size > std::numeric_limits<std::uint32_t>::max() ||
+        mft_offset >= volume_size) {
+        return false;
+    }
+
+    std::uint64_t record_size = 0;
+    if (record_size_code > 0) {
+        if (!mul_u64(
+                static_cast<std::uint64_t>(record_size_code),
+                cluster_size,
+                record_size)) {
+            return false;
+        }
+    } else {
+        const auto exponent = static_cast<unsigned int>(-record_size_code);
+        if (exponent >= 32) return false;
+        record_size = std::uint64_t{1} << exponent;
+    }
+    if (record_size < bytes_per_sector ||
+        record_size > 1024U * 1024U ||
+        record_size > volume_size - mft_offset) {
+        return false;
+    }
+
+    result.volume_offset_bytes = 0;
+    result.volume_size_bytes = volume_size;
+    result.total_sectors = total_sectors;
+    result.mft_lcn = mft_lcn;
+    result.mft_offset_bytes = mft_offset;
+    result.cluster_size_bytes = cluster_size;
+    result.record_size_bytes = static_cast<std::uint32_t>(record_size);
+    result.bytes_per_sector = bytes_per_sector;
+    result.sectors_per_cluster = sectors_per_cluster;
+    return true;
+}
 
 std::vector<FileEntry> scan_mft(const ReadAt& read_at) {
     std::vector<FileEntry> entries;

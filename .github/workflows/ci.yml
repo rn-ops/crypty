@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Native tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Load native library from Python
+        run: python -c "from core.native_backend import NativeBackend; NativeBackend()"
+      - name: Python syntax
+        run: python -m compileall -q app core data ui website/bot
+      - name: Website chatbot tests
+        working-directory: website/bot
+        run: python -m unittest discover -s . -p "test_*.py"

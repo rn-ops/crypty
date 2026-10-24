@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../filesystem/reader.hpp"
-#include "../include/crypty/workflow.hpp"
+#include "../reader.hpp"
+#include "../src/workflow.hpp"
 
 #include <cstdint>
 #include <string>

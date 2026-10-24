@@ -6,7 +6,7 @@
 namespace crypty {
 enum class Operation { Recovery, Erasure };
 enum class State { Ready, Inspected, Running, Complete };
-struct TargetProfile { std::string path = "D:\\Evidence\\Case-0248"; std::string medium = "External SSD / NTFS"; std::string strategy = "Filesystem + carving"; std::string risk = "Read-only analysis"; };
+struct TargetProfile { std::string path = "."; std::string medium = "External SSD / NTFS"; std::string strategy = "Filesystem + carving"; std::string risk = "Read-only analysis"; };
 struct DataRun {
     std::uint64_t lcn = 0;
     std::uint64_t length = 0;

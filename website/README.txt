@@ -19,7 +19,7 @@ Site with the optional chat service:
   2. Set XAI_API_KEY in the server environment. Never put it in browser code,
      HTML, or a committed file.
   3. From the repository root, run:
-       py -3 website\bot\server.py
+       python website/bot/server.py
   4. Open http://127.0.0.1:8000.
 
 The default server binds to localhost. The chat endpoint uses the xAI API;

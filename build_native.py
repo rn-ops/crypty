@@ -6,37 +6,31 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-OUTPUT = ROOT / "crypty_native.dll"
+BUILD_DIR = ROOT / "build"
 
 
 def main() -> None:
-    compiler = shutil.which("g++")
-    if compiler is None:
-        raise SystemExit("g++ was not found. Install MinGW or build crypty_native with CMake.")
-    command = [
-        compiler,
-        "-std=c++17",
-        "-shared",
-        "-static-libgcc",
-        "-static-libstdc++",
-        str(ROOT / "core" / "src" / "workflow.cpp"),
-        str(ROOT / "core" / "recovery" / "fat32_detector.cpp"),
-        str(ROOT / "core" / "recovery" / "ntfs_detector.cpp"),
-        str(ROOT / "core" / "recovery" / "exfat_detector.cpp"),
-        str(ROOT / "core" / "src" / "native_bridge.cpp"),
-        str(ROOT / "reporting" / "report.cpp"),
-        "-I" + str(ROOT / "core" / "include"),
-        "-I" + str(ROOT / "reporting"),
-        "-o",
-        str(OUTPUT),
-    ]
-    subprocess.run(command, check=True)
+    cmake = shutil.which("cmake")
+    if cmake is None:
+        raise SystemExit("CMake was not found. Install CMake 3.20 or newer.")
 
-    runtime = Path(compiler).resolve().parent / "libwinpthread-1.dll"
-    if runtime.is_file():
-        shutil.copy2(runtime, ROOT / runtime.name)
-
-    print(f"Built {OUTPUT}")
+    subprocess.run(
+        [cmake, "-S", str(ROOT), "-B", str(BUILD_DIR)],
+        check=True,
+    )
+    subprocess.run(
+        [
+            cmake,
+            "--build",
+            str(BUILD_DIR),
+            "--target",
+            "crypty_native",
+            "--config",
+            "Release",
+        ],
+        check=True,
+    )
+    print(f"Built crypty_native in {BUILD_DIR}")
 
 if __name__ == "__main__":
     main()

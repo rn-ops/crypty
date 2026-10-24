@@ -21,33 +21,34 @@ class NativeBackend:
             raise RuntimeError("The Crypty workflow engine could not be created")
 
     def _find_library(self) -> Path:
-        library_name = (
-            "crypty_native.dll"
-            if sys.platform == "win32"
-            else "libcrypty_native.so"
-        )
-
         project_root = Path(__file__).resolve().parents[1]
+        if sys.platform == "win32":
+            library_names = ("crypty_native.dll",)
+        elif sys.platform == "darwin":
+            library_names = ("libcrypty_native.dylib",)
+        else:
+            library_names = ("libcrypty_native.so",)
 
         candidates = []
-
         configured = os.environ.get("CRYPTY_NATIVE_LIBRARY")
         if configured:
             candidates.append(Path(configured))
 
-        candidates.extend([
-            project_root / library_name,
-            project_root / "build" / "Release" / library_name,
-            project_root / "build" / library_name,
-        ])
+        for library_name in library_names:
+            candidates.extend([
+                project_root / library_name,
+                project_root / "build" / "Release" / library_name,
+                project_root / "build" / "Debug" / library_name,
+                project_root / "build" / library_name,
+            ])
 
-        # Also support PyInstaller later
         if hasattr(sys, "_MEIPASS"):
             bundle_root = Path(sys._MEIPASS)
-            candidates.extend([
-                bundle_root / library_name,
-                bundle_root / "_internal" / library_name,
-            ])
+            for library_name in library_names:
+                candidates.extend([
+                    bundle_root / library_name,
+                    bundle_root / "_internal" / library_name,
+                ])
 
         for candidate in candidates:
             if candidate.is_file():

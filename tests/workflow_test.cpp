@@ -1,4 +1,4 @@
-#include "crypty/workflow.hpp"
+#include "workflow.hpp"
 #include <cassert>
 #include <filesystem>
 #include <fstream>

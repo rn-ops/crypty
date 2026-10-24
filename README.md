@@ -1,10 +1,13 @@
 # Crypty
 
-Crypty is an early-stage, Windows-oriented workstation for authorized data
+Crypty is an early-stage, cross-platform workstation for authorized data
 recovery, digital-forensics workflows, and media sanitization. The product
 goal is a dependable, local-first tool that helps an operator preserve source
 media, recover what remains recoverable, sanitize only explicitly authorized
-targets, and produce reviewable records of what happened.
+targets, and produce reviewable records of what happened. Development currently
+happens on Windows, but platform-specific behavior must stay behind explicit
+adapters so Windows, Linux, and macOS support can be built and tested without
+rewriting the product core.
 
 This repository is a prototype, not a production forensic suite. Some native
 filesystem and recovery code, a Python desktop UI, an authentication service,
@@ -17,21 +20,26 @@ outcomes based on the prototype.
 
 ### Prerequisites
 
-- Windows 10/11
 - Python 3.10 or newer
 - CMake 3.20 or newer and a C++17 compiler for the native core
 - Git
 
+The native storage boundary now has Windows and POSIX implementations, and
+the CMake configuration selects one for the host OS. Linux/macOS builds,
+permissions, recovery behavior, UI packaging, and physical-device support
+still need validation in CI and on those operating systems before they can be
+claimed as release-ready.
+
 The desktop UI and native core are separate components. Install Python
 dependencies from the repository root:
 
-```powershell
-py -3 -m pip install -r requirements.txt
+```sh
+python -m pip install -r requirements.txt
 ```
 
-Build the C++ libraries and run the native tests:
+Build the C++ libraries and run the native tests on Windows, Linux, or macOS:
 
-```powershell
+```sh
 cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
@@ -40,27 +48,30 @@ ctest --test-dir build -C Release --output-on-failure
 The UI uses the authentication service in `auth/api`. Install its dependencies
 and create the first local admin account from the repository root:
 
-```powershell
-py -3 -m pip install -r auth\api\requirements.txt
-py -3 auth\api\create_first_admin.py admin1 "choose-a-strong-password"
+```sh
+python -m pip install -r auth/api/requirements.txt
+python auth/api/create_first_admin.py admin1 "choose-a-strong-password"
 ```
 
 Then start the service in a terminal:
 
-```powershell
-py -3 auth\api\app.py
+```sh
+python auth/api/app.py
 ```
 
 The service defaults to `http://127.0.0.1:5000`; set `CRYPTY_AUTH_URL` if your
 development service uses another address. Do not expose the development
 service publicly or treat its current authentication setup as production
 deployment guidance.
+The SQLite database uses `CRYPTY_AUTH_DB` when set, preserves the existing
+development database beside the API when present, and otherwise uses the
+operating system's per-user application-data directory.
 
 With the authentication service running, launch the desktop UI from another
 terminal at the repository root:
 
-```powershell
-py -3 -m app.main
+```sh
+python -m app.main
 ```
 
 ### Website
@@ -102,31 +113,39 @@ as released product capabilities.
 - `core/native_backend.py` and `core/src/native_bridge.cpp`: Python-to-native
   boundary. Keep it narrow and typed; avoid implementing product policy in
   both languages.
+- `core/device_access.hpp` and `core/platform/`: platform-neutral storage
+  interface and OS-specific enumeration/read adapters. The native algorithms
+  should consume bounded reads and remain independent of OS handles.
 - `auth/`: separate Flask authentication API, its database/models, and
   development utilities.
-- `tests/`: C++ workflow, filesystem-detection, and FAT32 recovery tests.
+- `tests/`: C++ workflow, filesystem detection, FAT32 recovery, NTFS boot
+  parsing, and platform-independent image-read tests.
 - `website/`: static landing page and an optional local chat server.
 - `data/`: demo data. Clearly label simulated output wherever it appears.
 
 The Python recovery and sanitization engine classes are currently thin
 facades. The presence of a UI page or native source file does not by itself
-mean an end-to-end, production-safe workflow exists. Keep the native core
-portable where practical, and put operating-system-specific device access
-behind explicit platform adapters.
+mean an end-to-end, production-safe workflow exists. Platform adapters are a
+first portability step, not proof of validated cross-platform operation.
 
-## Core MVP roadmap
+## Cross-platform core MVP roadmap
 
-Treat each phase as a release gate: do not move destructive operations into
-real-device workflows before the preceding safety, testing, and audit gates
-are met.
+Treat portability as an architectural constraint from the beginning, not a
+cleanup project to defer until all features are complete. Keep changes small
+and continuously build/test on each target OS. Do not move destructive
+operations into real-device workflows before the preceding safety, testing,
+and audit gates are met.
 
-### 1. Define and freeze the MVP contract
+### 1. Define the MVP and platform support contract
 
-- Specify supported Windows versions, filesystems, device types, and
-  operation modes.
+- Specify supported OS versions, filesystems, device types, and operation
+  modes; decide which operating systems will be first-class MVP targets and
+  which may follow.
 - Decide what the first release will explicitly not support (for example,
   RAID, encrypted volumes without keys, damaged hardware, or guaranteed SSD
   recovery).
+- Define a platform capability matrix for volume enumeration, raw read-only
+  access, permissions, imaging, recovery, sanitization, and packaging.
 - Document operator authorization, privacy/data retention, and incident
   handling expectations.
 - Create a feature matrix that labels each capability as implemented,
@@ -134,7 +153,28 @@ are met.
 
 **Done when:** product scope and claims are testable and match the code.
 
-### 2. Make evidence acquisition safe and repeatable
+### 2. Establish and enforce the portability boundary
+
+- Continue inventorying OS-specific paths, compiler assumptions, packaging,
+  and dependencies.
+- Keep the platform-neutral device/storage interface. Windows and POSIX
+  adapters now live in separate platform-specific source files; select them
+  in CMake without leaking OS headers into shared interfaces.
+- Keep filesystem parsing and recovery algorithms platform-independent:
+  give them a bounded random-access reader interface, not OS handles or
+  device paths.
+- Use `std::filesystem` and platform-neutral Python APIs for ordinary paths;
+  isolate raw-device access, privilege checks, alignment, and device identity
+  behind adapters.
+- Make unsupported platform operations return an explicit capability/error,
+  never a demo success or silent fallback.
+- Keep CI builds and tests on every declared target green before expanding
+  features.
+
+**Done when:** the core builds on each declared OS, platform-specific code is
+isolated, and unsupported device operations fail clearly.
+
+### 3. Make evidence acquisition safe and repeatable
 
 - Implement reliable device identification and stable source handles.
 - Default evidence access to read-only; make read/write state visible and
@@ -148,7 +188,7 @@ are met.
 **Done when:** tests prove analysis does not modify source bytes, and image
 hashes and errors are reproducible.
 
-### 3. Deliver a bounded recovery workflow
+### 4. Deliver a bounded recovery workflow
 
 - Establish small, known-good image fixtures for each supported filesystem.
 - Validate detection, metadata parsing, deleted-entry identification, and
@@ -163,7 +203,7 @@ hashes and errors are reproducible.
 **Done when:** automated tests cover normal, damaged, truncated, and
 interrupted cases and compare output against known fixture hashes.
 
-### 4. Add a durable operation ledger
+### 5. Add a durable operation ledger
 
 - Use structured operation records/events with stable IDs, timestamps,
   actor, target fingerprint, operation/configuration, outcome, and
@@ -178,7 +218,7 @@ interrupted cases and compare output against known fixture hashes.
 **Done when:** an operator can reconstruct who did what, to which target,
 with what settings and result, including failed/interrupted runs.
 
-### 5. Implement sanitization only after safety review
+### 6. Implement sanitization only after safety review
 
 - Begin with a **simulation/planning mode** that identifies the target,
   evaluates the device and available methods, and produces a preview without
@@ -198,13 +238,13 @@ with what settings and result, including failed/interrupted runs.
 the operation is auditable, and the report states exactly what was and was
 not verified.
 
-### 6. Harden, package, and support the desktop workstation
+### 7. Harden, package, and support the desktop workstation
 
 - Centralize configuration, logging, error types, and version reporting.
-- Add dependency pinning/lock strategy, reproducible builds, signed release
-  artifacts, and update/rollback procedures.
+- Add per-platform dependency/build configuration, reproducible builds,
+  signed release artifacts, and update/rollback procedures.
 - Test fresh install, least-privilege use, recovery from crashes, multiple
-  display/DPI settings, and supported Windows/device combinations.
+  display/DPI settings, and supported OS/device combinations.
 - Remove development auth bypasses and secrets from distributable builds;
   review authentication, authorization, local database protection, and
   session expiry before any external pilot.
@@ -214,7 +254,7 @@ not verified.
 **Done when:** another team member can install, validate, and use a release
 from documented steps without developer-only setup.
 
-### 7. Make the website launch-ready
+### 8. Make the website launch-ready
 
 - Replace mock product metrics and simulated workflow imagery with clearly
   labeled product screenshots or architecture illustrations.
@@ -243,6 +283,28 @@ authentication, website concerns, and device I/O out of filesystem parsers.
 Prefer small typed interfaces and structured results to generic dictionaries
 crossing the Python/C++ boundary. Avoid a large rewrite; extract seams while
 adding tested behavior.
+
+The single file in `app/` is currently just the desktop entry point and
+composition root; the screens live under `ui/`, while authentication and
+workflows live elsewhere. That is not automatically a defect. Keep
+`app/main.py` small and split bootstrap/configuration or application use cases
+into modules only when they have real responsibilities. Do not move UI code
+into `app/` simply to make the directory look fuller.
+
+### Cross-platform status
+
+The C++ core now has a platform-neutral storage boundary, a Windows adapter,
+and a POSIX adapter selected by CMake. The Python native-library loader and
+build/package entry points also select platform-specific library names. CI is
+configured for Windows, Linux, and macOS. Only the Windows build and tests
+have been run in the current development environment; Linux/macOS CI results
+and physical-device behavior still need validation.
+
+The next portability work is to confirm CI on all three operating systems,
+test privilege/error behavior with disposable images and devices, verify
+native packaging and Qt startup on each OS, and improve device identity and
+capability reporting. Keep platform gaps explicit; a successful build is not
+proof of safe physical-device access.
 
 ### Use an event ledger, not event sourcing everywhere
 

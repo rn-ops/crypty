@@ -10,12 +10,39 @@ Tables:
 
 import sqlite3
 import os
+import sys
+from pathlib import Path
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "secureforensics.db")
+_LEGACY_DB_PATH = Path(__file__).resolve().with_name("secureforensics.db")
+
+
+def _default_db_path() -> Path:
+    configured_path = os.environ.get("CRYPTY_AUTH_DB")
+    if configured_path:
+        return Path(configured_path).expanduser()
+    if _LEGACY_DB_PATH.is_file():
+        return _LEGACY_DB_PATH
+
+    if sys.platform == "win32":
+        data_root = Path(
+            os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+        )
+    elif sys.platform == "darwin":
+        data_root = Path.home() / "Library" / "Application Support"
+    else:
+        data_root = Path(
+            os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+        )
+    return data_root / "Crypty" / "secureforensics.db"
+
+
+DB_PATH = _default_db_path()
 
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    db_path = Path(DB_PATH).expanduser()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

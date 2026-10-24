@@ -1,17 +1,13 @@
-#include "crypty/workflow.hpp"
-#include "report.hpp"
+#include "workflow.hpp"
+#include "../device_access.hpp"
+#include "../reporting/report.hpp"
 #include "../recovery/recovery_engine.hpp"
-#include "../filesystem/reader.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 #include <algorithm>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 #if defined(_WIN32)
 #define CRYPTY_API __declspec(dllexport)
@@ -35,56 +31,10 @@ const char* copy_string(const std::string& value) {
     return result.c_str();
 }
 
-struct Device {
-    std::string path;
-    std::string name;
-    std::string filesystem;
-    std::string media_type;
-    std::string interface_name;
-    std::uint64_t capacity = 0;
-    std::string status;
-};
+using Device = crypty::platform::StorageDevice;
 
 std::vector<Device> detect_devices() {
-    std::vector<Device> devices;
-#ifdef _WIN32
-    const DWORD drives = GetLogicalDrives();
-    for (int index = 0; index < 26; ++index) {
-        if ((drives & (1u << index)) == 0) continue;
-        const std::string root = std::string(1, static_cast<char>('A' + index)) + ":\\";
-        char volume_name[MAX_PATH]{};
-        char filesystem_name[MAX_PATH]{};
-        DWORD serial = 0;
-        DWORD max_component = 0;
-        DWORD flags = 0;
-        if (!GetVolumeInformationA(root.c_str(), volume_name, MAX_PATH, &serial,
-                                   &max_component, &flags, filesystem_name,
-                                   MAX_PATH)) {
-            continue;
-        }
-        ULARGE_INTEGER available{};
-        ULARGE_INTEGER total{};
-        ULARGE_INTEGER free_bytes{};
-        if (!GetDiskFreeSpaceExA(root.c_str(), &available, &total, &free_bytes)) {
-            continue;
-        }
-        const UINT drive_type = GetDriveTypeA(root.c_str());
-        const bool removable = drive_type == DRIVE_REMOVABLE;
-        devices.push_back({
-            root,
-            volume_name[0] == '\0' ? root : volume_name,
-            filesystem_name,
-            removable ? "Removable" : "Local volume",
-            removable ? "USB / removable" : "Windows volume",
-            total.QuadPart,
-            "CONNECTED",
-        });
-    }
-#else
-    devices.push_back({"/", "Root filesystem", "native", "Local volume",
-                       "POSIX volume", 0, "CONNECTED"});
-#endif
-    return devices;
+    return crypty::platform::enumerate_devices();
 }
 
 std::vector<Device>& devices() {
@@ -92,136 +42,9 @@ std::vector<Device>& devices() {
     return value;
 }
 
-std::string raw_media_path(const std::string& path) {
-#ifdef _WIN32
-    if (path.size() >= 2 && path[1] == ':') return "\\\\.\\" + path.substr(0, 2);
-#endif
-    return path;
-}
-
 std::size_t read_media(const std::string& path, std::uint64_t offset,
                        std::uint8_t* output, std::size_t capacity) {
-    if (output == nullptr || capacity == 0) return 0;
-#ifdef _WIN32
-
-    const auto media = raw_media_path(path);
-
-    HANDLE handle = CreateFileA(
-        media.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ |
-        FILE_SHARE_WRITE |
-        FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr
-    );
-
-    if (handle == INVALID_HANDLE_VALUE) {
-        return 0;
-    }
-
-    constexpr std::uint64_t SECTOR_SIZE = 512;
-
-    const std::uint64_t aligned_offset =
-        offset -
-        (offset % SECTOR_SIZE);
-
-    const std::uint64_t offset_delta =
-        offset -
-        aligned_offset;
-
-    const std::uint64_t aligned_size =
-        ((offset_delta + capacity + SECTOR_SIZE - 1) /
-            SECTOR_SIZE) *
-        SECTOR_SIZE;
-
-    if (aligned_size > 1024ULL * 1024ULL) {
-        CloseHandle(handle);
-        return 0;
-    }
-
-    std::vector<std::uint8_t> aligned_buffer(
-        static_cast<std::size_t>(aligned_size)
-    );
-
-    LARGE_INTEGER position{};
-    position.QuadPart =
-        static_cast<LONGLONG>(aligned_offset);
-
-    DWORD bytes_read = 0;
-
-    const bool seek_ok =
-        SetFilePointerEx(
-            handle,
-            position,
-            nullptr,
-            FILE_BEGIN
-        );
-
-    const bool read_ok =
-        seek_ok &&
-        ReadFile(
-            handle,
-            aligned_buffer.data(),
-            static_cast<DWORD>(aligned_size),
-            &bytes_read,
-            nullptr
-        );
-
-    if (!read_ok) {
-
-        std::printf(
-            "RAW READ FAILED: offset=%llu aligned=%llu "
-            "requested=%zu aligned_size=%llu error=%lu\n",
-            static_cast<unsigned long long>(offset),
-            static_cast<unsigned long long>(aligned_offset),
-            capacity,
-            static_cast<unsigned long long>(aligned_size),
-            static_cast<unsigned long>(GetLastError())
-        );
-
-        CloseHandle(handle);
-        return 0;
-    }
-
-    if (
-        bytes_read <
-        offset_delta + capacity
-    ) {
-        CloseHandle(handle);
-        return 0;
-    }
-
-    memcpy(
-        output,
-        aligned_buffer.data() + offset_delta,
-        capacity
-    );
-
-    std::printf(
-        "RAW READ: offset=%llu requested=%zu "
-        "aligned=%llu read=%lu\n",
-        static_cast<unsigned long long>(offset),
-        capacity,
-        static_cast<unsigned long long>(aligned_offset),
-        static_cast<unsigned long>(bytes_read)
-    );
-
-    CloseHandle(handle);
-
-    return capacity;
-
-#else
-
-    (void)path;
-    (void)offset;
-    (void)output;
-    (void)capacity;
-    return 0;
-
-#endif
+    return crypty::platform::read_media(path, offset, output, capacity);
 }
 
 

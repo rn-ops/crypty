@@ -2,7 +2,7 @@
 #include "recovery_engine.hpp"
 
 #include "../filesystem/detector.hpp"
-#include "../filesystem/types.hpp"
+#include "../types.hpp"
 
 #include "ntfs/ntfs_recovery.hpp"
 #include "fat32/fat32_recovery.hpp"

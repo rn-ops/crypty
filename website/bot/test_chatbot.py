@@ -66,7 +66,7 @@ class ChatbotTests(unittest.TestCase):
         context = load_project_context()
 
         self.assertIn("Crypty", context)
-        self.assertIn("core/include/crypty/workflow.hpp", context)
+        self.assertIn("core/src/workflow.hpp", context)
 
     def test_empty_question_is_rejected(self):
         with self.assertRaises(ValueError):
