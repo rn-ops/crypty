@@ -46,16 +46,29 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 The UI uses the authentication service in `auth/api`. Install its dependencies
-and create the first local admin account from the repository root:
+with the same Python interpreter you will use to start the service. Avoid a
+standalone `pip install` if multiple Python installations are present:
 
 ```sh
 python -m pip install -r auth/api/requirements.txt
-python auth/api/create_first_admin.py admin1 "choose-a-strong-password"
+python -c "import sys, flask; print(sys.executable); print(flask.__version__)"
 ```
 
-Then start the service in a terminal:
+If using the Windows Python launcher, consistently select one version for
+installation, account setup, and startup (for example, replace `python` in
+these commands with `py -3.13`):
 
 ```sh
+python auth/api/create_first_admin.py admin1 "choose-a-strong-password"
+python auth/api/app.py
+```
+
+If the import check fails, install the service dependencies using the exact
+interpreter printed by `python -c "import sys; print(sys.executable)"`, then
+run the service with that same interpreter. For example:
+
+```sh
+python -m pip install -r auth/api/requirements.txt
 python auth/api/app.py
 ```
 
@@ -73,6 +86,66 @@ terminal at the repository root:
 ```sh
 python -m app.main
 ```
+
+## Building a local app bundle
+
+Build and package on the same operating system and CPU architecture you intend
+to distribute. Crypty's native library is not cross-compiled by this workflow.
+The current PyInstaller spec creates a **development folder bundle**, not a
+signed installer or a release-ready app package.
+
+### Windows (PowerShell)
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pip install pyinstaller
+python build_native.py
+python -m PyInstaller --clean --noconfirm Crypty.spec
+```
+
+The development bundle is `dist\Crypty\Crypty.exe` plus its `_internal`
+dependencies. Zip the whole `dist\Crypty` directory for internal testing; do
+not distribute the executable alone.
+
+### Linux (Bash)
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install pyinstaller
+python build_native.py
+python -m PyInstaller --clean --noconfirm Crypty.spec
+```
+
+The development bundle is `dist/Crypty/`. Verify it on each supported Linux
+distribution before publishing. A signed AppImage or distribution package
+(.deb/.rpm) still needs a separate release pipeline.
+
+### macOS (zsh)
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install pyinstaller
+python build_native.py
+python -m PyInstaller --clean --noconfirm Crypty.spec
+```
+
+This creates a folder bundle for local testing, not a signed/notarized `.app`
+or `.dmg`. Build separately on each target architecture (Apple Silicon and,
+if supported, Intel); sign and notarize before external distribution.
+
+These desktop commands do not install or start the Flask authentication
+service. Today the desktop app still expects `auth/api` to be running at
+`CRYPTY_AUTH_URL` (default `http://127.0.0.1:5000`). That is a development
+dependency, not a viable end-user installation flow. Before an MVP release,
+either add a properly designed offline/local-user mode or deploy and document
+a secured account service; do not make customers run the developer bootstrap
+script or expose the development Flask server.
 
 ### Website
 
@@ -135,6 +208,37 @@ cleanup project to defer until all features are complete. Keep changes small
 and continuously build/test on each target OS. Do not move destructive
 operations into real-device workflows before the preceding safety, testing,
 and audit gates are met.
+
+### Fastest responsible path to the promised MVP
+
+Keep the MVP to one desktop workstation workflow on each declared OS:
+**inspect/acquire evidence → recover to a separate destination → sanitize an
+explicitly selected supported target → export a durable operation report**.
+The website should explain the actual release, limitations, and support path;
+it is not a second product backend.
+
+To avoid ballooning the first release, defer face authentication, AI chat,
+payments, licensing, team/central audit, cloud synchronization, and broad
+filesystem/device coverage. Keep them visibly planned on the website rather
+than making them prerequisites for the local workstation MVP. Use the current
+auth API only for development until a supported user/account model is chosen.
+
+Execute in this order, making each row a release gate:
+
+| Gate | Ship this | Exit criteria |
+| --- | --- | --- |
+| 0. Scope | Freeze OS/CPU targets, filesystems, supported source types, and non-goals | A capability matrix separates implemented, experimental, and unavailable operations |
+| 1. Portability | Green native build, unit tests, and app startup on Windows/Linux/macOS CI | Each OS has a real tested adapter; unsupported hardware access fails clearly |
+| 2. Evidence safety | Inspect/acquire a source read-only, verify an image hash, and keep output elsewhere | Fixture tests prove source bytes do not change; interrupted/error cases are reported |
+| 3. Recovery | Finish one filesystem end-to-end first, then add others only when tested | Known image fixtures recover expected bytes/hashes; partial recovery is explicit |
+| 4. Audit/report | Persist operation ID, actor, target identity, settings, timestamps, warnings, result, and verification | Restarting the app does not erase records; report export matches stored operation data |
+| 5. Sanitization | Start with plan/preview; enable a real method only for supported, unambiguous media after review | Wrong-target, missing-permission, cancellation, and verification-failure tests all fail safe |
+| 6. Product release | Resolve the auth startup dependency, package per OS, publish accurate website/help | Fresh-machine install and basic workflow validated on every declared target |
+
+For speed, do not parallelize recovery and real sanitization implementation
+before the evidence boundary and audit schema stabilize. Build recovery and
+sanitization as separate use cases, but share device identity, permissions,
+progress/error reporting, operation IDs, and report infrastructure.
 
 ### 1. Define the MVP and platform support contract
 
