@@ -2,12 +2,32 @@
 #include <crypty/platform/device_access.hpp>
 #include "../reporting/report.hpp"
 #include "../recovery/recovery_engine.hpp"
+#include "../sanitization/sanitization_engine.hpp"
+#include <crypty/sanitization/policy_engine.hpp>
+#include <crypty/sanitization/execution_authorization.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <atomic>
+#include <filesystem>
+#include <limits>
+#include <iterator>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #if defined(_WIN32)
 #define CRYPTY_API __declspec(dllexport)
@@ -47,10 +67,279 @@ std::size_t read_media(const std::string& path, std::uint64_t offset,
     return crypty::platform::read_media(path, offset, output, capacity);
 }
 
+using crypty::sanitization::FileIdentity;
+using crypty::sanitization::SanitizationPlan;
+using crypty::sanitization::SanitizationResult;
+
+constexpr char kDisposableImageMarker[] = "CRYPTY_DISPOSABLE_IMAGE_V1\n";
+
+struct SanitizationOperation {
+    SanitizationPlan plan;
+    SanitizationResult result;
+    bool executed = false;
+};
+
+std::atomic<std::uint64_t> next_sanitization_plan_id{1};
+
+bool inspect_disposable_image(
+    const std::filesystem::path& path,
+    std::uint64_t& size,
+    FileIdentity& identity,
+    std::string& reason
+) {
+#if defined(_WIN32)
+    HANDLE file = CreateFileW(
+        path.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr
+    );
+    if (file == INVALID_HANDLE_VALUE) {
+        reason = "Could not open the selected image for read-only inspection. Win32 error: " +
+            std::to_string(GetLastError());
+        return false;
+    }
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    LARGE_INTEGER file_size{};
+    const bool metadata_ok =
+        GetFileInformationByHandle(file, &info) != 0 &&
+        GetFileSizeEx(file, &file_size) != 0;
+    if (!metadata_ok) {
+        reason = "Could not inspect the selected image metadata.";
+        CloseHandle(file);
+        return false;
+    }
+
+    if ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        reason = "Directories and reparse points are not valid disposable-image targets.";
+        CloseHandle(file);
+        return false;
+    }
+    if (file_size.QuadPart <= 0) {
+        reason = "The selected image must be a non-empty file.";
+        CloseHandle(file);
+        return false;
+    }
+
+    char marker[sizeof(kDisposableImageMarker) - 1]{};
+    DWORD bytes_read = 0;
+    const bool marker_ok = ReadFile(
+        file, marker, static_cast<DWORD>(sizeof(marker)), &bytes_read, nullptr
+    ) != 0 && bytes_read == sizeof(marker) &&
+        std::equal(std::begin(marker), std::end(marker), kDisposableImageMarker);
+    CloseHandle(file);
+    if (!marker_ok) {
+        reason = "The file does not contain the Crypty disposable-image marker; it was not modified.";
+        return false;
+    }
+
+    size = static_cast<std::uint64_t>(file_size.QuadPart);
+    identity.valid = true;
+    identity.volume_or_device_id = info.dwVolumeSerialNumber;
+    identity.file_id_high = info.nFileIndexHigh;
+    identity.file_id_low = info.nFileIndexLow;
+    return true;
+#else
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        reason = "Could not open the selected image for read-only inspection: " +
+            std::string(std::strerror(errno));
+        return false;
+    }
+
+    struct stat info{};
+    if (::fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+        reason = "The target must be a regular file, not a directory or device.";
+        ::close(fd);
+        return false;
+    }
+    if (info.st_size <= 0) {
+        reason = "The selected image must be a non-empty file.";
+        ::close(fd);
+        return false;
+    }
+
+    char marker[sizeof(kDisposableImageMarker) - 1]{};
+    const auto bytes_read = ::pread(fd, marker, sizeof(marker), 0);
+    ::close(fd);
+    if (bytes_read != static_cast<ssize_t>(sizeof(marker)) ||
+        !std::equal(std::begin(marker), std::end(marker), kDisposableImageMarker)) {
+        reason = "The file does not contain the Crypty disposable-image marker; it was not modified.";
+        return false;
+    }
+
+    size = static_cast<std::uint64_t>(info.st_size);
+    identity.valid = true;
+    identity.volume_or_device_id = static_cast<std::uint64_t>(info.st_dev);
+    identity.file_id_high = 0;
+    identity.file_id_low = static_cast<std::uint64_t>(info.st_ino);
+    return true;
+#endif
+}
+
+SanitizationOperation* sanitization_operation(void* handle) {
+    return static_cast<SanitizationOperation*>(handle);
+}
 
 }
 
 extern "C" {
+CRYPTY_API void* crypty_sanitization_plan_image_file(const char* raw_path) {
+    auto* operation = new SanitizationOperation{};
+    auto& plan = operation->plan;
+    const std::string plan_id = "IMAGE-CLEAR-" +
+        std::to_string(next_sanitization_plan_id.fetch_add(1));
+    plan.plan_id = plan_id;
+    plan.policy_id = "CRYPTY-IMAGE-CLEAR";
+    plan.target_kind = crypty::sanitization::TargetKind::DiskImageFile;
+    plan.required_level = crypty::sanitization::AssuranceLevel::Clear;
+    plan.requires_post_sanitization_validation = true;
+    plan.requires_audit_evidence = true;
+
+    if (raw_path == nullptr || *raw_path == '\0') {
+        plan.status = crypty::sanitization::PlanStatus::Blocked;
+        plan.status_reason = "An explicit image-file path is required.";
+        return operation;
+    }
+
+    std::error_code ec;
+    const auto canonical_path = std::filesystem::canonical(
+        std::filesystem::u8path(raw_path), ec
+    );
+    if (ec) {
+        plan.target_path = raw_path;
+        plan.status = crypty::sanitization::PlanStatus::Blocked;
+        plan.status_reason = "The selected path does not resolve to an existing file: " + ec.message();
+        return operation;
+    }
+
+    plan.target_path = canonical_path.u8string();
+    plan.device_id = "IMAGE:" + plan.target_path;
+
+    std::uint64_t size = 0;
+    FileIdentity identity{};
+    std::string inspection_reason;
+    if (!inspect_disposable_image(canonical_path, size, identity, inspection_reason)) {
+        plan.status = crypty::sanitization::PlanStatus::Blocked;
+        plan.status_reason = std::move(inspection_reason);
+        return operation;
+    }
+
+    crypty::sanitization::SanitizationPolicy policy;
+    policy.policy_id = "CRYPTY-IMAGE-CLEAR";
+    policy.policy_version = "1.0";
+    policy.required_level = crypty::sanitization::AssuranceLevel::Clear;
+    policy.require_validation = true;
+    policy.require_audit_evidence = true;
+    policy.allow_fallback = false;
+    policy.permitted_methods = {
+        crypty::sanitization::Method::ImageFileOverwrite
+    };
+
+    crypty::sanitization::SanitizationTarget target;
+    target.device_id = plan.device_id;
+    target.media_type = crypty::sanitization::MediaType::Unknown;
+    target.capacity_bytes = size;
+    target.kind = crypty::sanitization::TargetKind::DiskImageFile;
+    target.target_path = plan.target_path;
+    target.available_methods = {
+        crypty::sanitization::Method::ImageFileOverwrite
+    };
+    target.target_identity = identity;
+
+    crypty::sanitization::PolicyEngine policy_engine;
+    plan = policy_engine.create_plan(policy, target);
+    plan.plan_id = plan_id;
+    return operation;
+}
+
+CRYPTY_API void crypty_sanitization_plan_destroy(void* handle) {
+    delete sanitization_operation(handle);
+}
+
+CRYPTY_API int crypty_sanitization_plan_status(void* handle) {
+    if (handle == nullptr) return static_cast<int>(crypty::sanitization::PlanStatus::Blocked);
+    return static_cast<int>(sanitization_operation(handle)->plan.status);
+}
+
+CRYPTY_API const char* crypty_sanitization_plan_reason(void* handle) {
+    if (handle == nullptr) return copy_string("Invalid sanitization plan handle.");
+    return copy_string(sanitization_operation(handle)->plan.status_reason);
+}
+
+CRYPTY_API const char* crypty_sanitization_plan_path(void* handle) {
+    if (handle == nullptr) return copy_string("");
+    return copy_string(sanitization_operation(handle)->plan.target_path);
+}
+
+CRYPTY_API std::uint64_t crypty_sanitization_plan_capacity(void* handle) {
+    if (handle == nullptr) return 0;
+    return sanitization_operation(handle)->plan.target_capacity_bytes;
+}
+
+CRYPTY_API int crypty_sanitization_execute_image_file(
+    void* handle,
+    int confirmed,
+    const char* confirmed_path,
+    std::uint64_t confirmed_capacity,
+    const char* confirmation_phrase
+) {
+    if (handle == nullptr) return 0;
+    auto* operation = sanitization_operation(handle);
+    if (operation->executed || operation->plan.status != crypty::sanitization::PlanStatus::Ready) {
+        return 0;
+    }
+
+    crypty::sanitization::ExecutionAuthorization authorization;
+    authorization.confirmed = confirmed != 0;
+    authorization.confirmed_target_path = confirmed_path == nullptr ? "" : confirmed_path;
+    authorization.confirmed_target_capacity_bytes = confirmed_capacity;
+    authorization.confirmation_phrase = confirmation_phrase == nullptr ? "" : confirmation_phrase;
+
+    crypty::sanitization::SanitizationEngine engine;
+    operation->result = engine.execute(operation->plan, authorization);
+    operation->executed = true;
+    return operation->result.successful ? 1 : 0;
+}
+
+CRYPTY_API int crypty_sanitization_result_executed(void* handle) {
+    return handle != nullptr && sanitization_operation(handle)->executed ? 1 : 0;
+}
+
+CRYPTY_API int crypty_sanitization_result_successful(void* handle) {
+    return handle != nullptr && sanitization_operation(handle)->result.successful ? 1 : 0;
+}
+
+CRYPTY_API int crypty_sanitization_result_execution_status(void* handle) {
+    if (handle == nullptr) return static_cast<int>(crypty::sanitization::ExecutionStatus::Failed);
+    return static_cast<int>(sanitization_operation(handle)->result.execution_status);
+}
+
+CRYPTY_API int crypty_sanitization_result_validation_status(void* handle) {
+    if (handle == nullptr) return static_cast<int>(crypty::sanitization::ValidationStatus::NotPerformed);
+    return static_cast<int>(sanitization_operation(handle)->result.validation_status);
+}
+
+CRYPTY_API std::uint64_t crypty_sanitization_result_bytes_processed(void* handle) {
+    if (handle == nullptr) return 0;
+    return sanitization_operation(handle)->result.bytes_processed;
+}
+
+CRYPTY_API const char* crypty_sanitization_result_error_code(void* handle) {
+    if (handle == nullptr) return copy_string("INVALID_HANDLE");
+    return copy_string(sanitization_operation(handle)->result.error_code);
+}
+
+CRYPTY_API const char* crypty_sanitization_result_error_message(void* handle) {
+    if (handle == nullptr) return copy_string("Invalid sanitization operation handle.");
+    return copy_string(sanitization_operation(handle)->result.error_message);
+}
+
 CRYPTY_API void* crypty_workflow_create() { return new crypty::Workflow(); }
 
 CRYPTY_API void crypty_workflow_destroy(void* handle) {

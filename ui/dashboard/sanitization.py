@@ -1,231 +1,292 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDialog,
+    QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
+    QInputDialog,
+    QLineEdit,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from core.sanitization_engine import (
+    CONFIRMATION_PHRASE,
+    SanitizationEngine,
+    SanitizationPlanHandle,
+)
 
-class SimulatedConfirmationDialog(QDialog):
-    def __init__(self, device_name, method, scope):
-        super().__init__()
-        self.setWindowTitle("Review sanitization request")
-        self.setModal(True)
-        self.resize(480, 240)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
+class _SanitizationWorker(QThread):
+    finished_result = Signal(dict)
+    failed = Signal(str)
 
-        title = QLabel("Review sanitization request")
-        title.setStyleSheet("font-size: 18px; font-weight: 600;")
-        layout.addWidget(title)
+    def __init__(
+        self,
+        engine: SanitizationEngine,
+        plan: SanitizationPlanHandle,
+        confirmation_phrase: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.engine = engine
+        self.plan = plan
+        self.confirmation_phrase = confirmation_phrase
 
-        info = QLabel(
-            f"Target: {device_name}\nMethod: {method}\nScope: {scope}\n\n"
-            "Execution is disabled in this environment. No device data will be changed."
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: #c3cbc7; line-height: 1.5;")
-        layout.addWidget(info)
-
-        buttons = QHBoxLayout()
-        cancel = QPushButton("CANCEL")
-        confirm = QPushButton("Submit request")
-        confirm.setProperty("class", "primary")
-        buttons.addWidget(cancel)
-        buttons.addStretch(1)
-        buttons.addWidget(confirm)
-        layout.addLayout(buttons)
-
-        cancel.clicked.connect(self.reject)
-        confirm.clicked.connect(self.accept)
+    def run(self):
+        try:
+            self.finished_result.emit(
+                self.engine.execute_image_file(self.plan, self.confirmation_phrase)
+            )
+        except Exception as error:
+            self.failed.emit(str(error))
 
 
 class SanitizationPage(QWidget):
+    """Real file-backed sanitization workflow; physical devices remain disabled."""
+
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
+        self.engine: SanitizationEngine = main_window.sanitization_engine
+        self._plan: SanitizationPlanHandle | None = None
+        self._worker: _SanitizationWorker | None = None
         self._build_ui()
         self.refresh_device_context()
 
     def refresh_device_context(self):
-        device = self.main_window.device_manager.get_selected_device()
-        self.selected_device_label.setText(device["name"])
-        self.target_details.setText(
-            f"{device['capacity']}  |  {device['media_type']}  |  {device['filesystem']}"
-        )
-        self.target_mount.setText(f"Mounted at {device['mount']}  |  {device['status'].title()}")
+        # The selected physical device is intentionally not used as a target.
+        if self._plan is None:
+            self.status_label.setText(
+                "Physical-device sanitization is disabled. Select a Crypty-marked disposable image file."
+            )
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 8, 20, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(20, 12, 20, 16)
+        layout.setSpacing(12)
 
         title_row = QHBoxLayout()
         title = QLabel("Sanitization")
-        title.setFixedHeight(24)
-        title.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         title_row.addWidget(title)
         title_row.addStretch(1)
-        demo_tag = QLabel("READ-ONLY ENVIRONMENT")
-        demo_tag.setFixedHeight(20)
-        demo_tag.setAlignment(Qt.AlignCenter)
-        demo_tag.setStyleSheet(
-            "color: #a7c0b7; border: 1px solid #3a4a48; padding: 2px 7px; "
-            "font-size: 10px; letter-spacing: 0.10em;"
+        tag = QLabel("DISPOSABLE IMAGE FILES ONLY")
+        tag.setStyleSheet(
+            "color: #e6c58b; border: 1px solid #5b4b31; padding: 4px 8px; "
+            "font-size: 10px; letter-spacing: 0.08em;"
         )
-        title_row.addWidget(demo_tag)
+        title_row.addWidget(tag)
         layout.addLayout(title_row)
 
         warning = QLabel(
-            "Prepare a sanitization request with an explicit target, scope, and audit trail."
+            "This workflow can overwrite a Crypty-marked disposable image file. "
+            "It does not sanitize physical drives, SSDs, USB devices, or mounted volumes. "
+            "Overwriting is destructive and cannot be undone."
         )
+        warning.setWordWrap(True)
         warning.setStyleSheet(
-            "color: #c3cbc7; font-size: 11px; background: transparent; padding: 4px 0;"
+            "color: #e6c58b; background: #211e18; padding: 10px; font-size: 12px;"
         )
         layout.addWidget(warning)
 
-        workspace = QHBoxLayout()
-        workspace.setSpacing(12)
-
         target = QFrame()
-        target.setMinimumHeight(142)
         target.setStyleSheet("background: #171c1f; border: none;")
         target_layout = QVBoxLayout(target)
-        target_layout.setContentsMargins(18, 18, 18, 18)
-        target_layout.setSpacing(10)
-        target_title = QLabel("SELECTED EVIDENCE SOURCE")
-        target_title.setStyleSheet("color: #9aa5a1; font-size: 10px; letter-spacing: 0.12em;")
-        target_layout.addWidget(target_title)
-        self.selected_device_label = QLabel("Samsung Portable SSD")
-        self.selected_device_label.setStyleSheet("font-size: 16px; font-weight: 600;")
-        target_layout.addWidget(self.selected_device_label)
-        self.target_details = QLabel("1 TB  |  SSD  |  NTFS")
-        self.target_details.setStyleSheet("color: #c3cbc7; font-size: 12px;")
-        target_layout.addWidget(self.target_details)
-        self.target_mount = QLabel("Mounted at /E:  |  Connected")
-        self.target_mount.setStyleSheet("color: #a7c0b7; font-size: 11px;")
-        target_layout.addWidget(self.target_mount)
-        workspace.addWidget(target, 1)
+        target_layout.setContentsMargins(18, 16, 18, 16)
+        target_layout.setSpacing(8)
 
-        plan = QFrame()
-        plan.setMinimumHeight(142)
-        plan.setStyleSheet("background: #171c1f; border: none;")
-        plan_layout = QGridLayout(plan)
-        plan_layout.setContentsMargins(18, 18, 18, 18)
-        plan_layout.setHorizontalSpacing(12)
-        plan_layout.setVerticalSpacing(8)
-        plan_title = QLabel("REQUEST PARAMETERS")
-        plan_title.setStyleSheet("color: #9aa5a1; font-size: 10px; letter-spacing: 0.12em;")
-        plan_layout.addWidget(plan_title, 0, 0, 1, 2)
+        target_heading = QLabel("PLANNED FILE TARGET")
+        target_heading.setStyleSheet(
+            "color: #9aa5a1; font-size: 10px; letter-spacing: 0.12em;"
+        )
+        target_layout.addWidget(target_heading)
 
-        method_label = QLabel("Method")
-        method_label.setStyleSheet("color: #c3cbc7; font-size: 11px;")
-        self.method = QComboBox()
-        self.method.addItems(["Device-aware sanitization", "Clear user data", "Prepare for disposal"])
-        plan_layout.addWidget(method_label, 1, 0)
-        plan_layout.addWidget(self.method, 1, 1)
+        self.target_path_label = QLabel("No image file selected")
+        self.target_path_label.setWordWrap(True)
+        self.target_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.target_path_label.setStyleSheet("font-size: 13px; font-weight: 600;")
+        target_layout.addWidget(self.target_path_label)
 
-        scope_label = QLabel("Scope")
-        scope_label.setStyleSheet("color: #c3cbc7; font-size: 11px;")
-        self.scope = QComboBox()
-        self.scope.addItems(["Entire selected device", "User data only"])
-        plan_layout.addWidget(scope_label, 2, 0)
-        plan_layout.addWidget(self.scope, 2, 1)
-        workspace.addWidget(plan, 2)
-        layout.addLayout(workspace)
+        self.plan_details_label = QLabel(
+            "Choose a file that was prepared as a Crypty disposable image."
+        )
+        self.plan_details_label.setWordWrap(True)
+        self.plan_details_label.setStyleSheet("color: #9aa5a1; font-size: 11px;")
+        target_layout.addWidget(self.plan_details_label)
+        layout.addWidget(target)
 
-        checks = QFrame()
-        checks.setStyleSheet("background: #171c1f; border: none;")
-        checks_layout = QHBoxLayout(checks)
-        checks_layout.setContentsMargins(14, 9, 14, 9)
-        checks_layout.setSpacing(16)
-        checks_title = QLabel("REQUIRED CONFIRMATIONS")
-        checks_title.setStyleSheet("color: #9aa5a1; font-size: 10px; letter-spacing: 0.12em;")
-        checks_layout.addWidget(checks_title)
-        self.target_check = QCheckBox("Target confirmed")
-        self.target_check.setChecked(True)
-        self.scope_check = QCheckBox("Scope confirmed")
-        self.scope_check.setChecked(True)
-        self.audit_check = QCheckBox("Write audit record")
-        self.audit_check.setChecked(True)
-        checks_layout.addWidget(self.target_check)
-        checks_layout.addWidget(self.scope_check)
-        checks_layout.addWidget(self.audit_check)
-        checks_layout.addStretch(1)
-        layout.addWidget(checks)
+        actions = QHBoxLayout()
+        self.select_button = QPushButton("Select image and inspect")
+        self.select_button.setProperty("class", "primary")
+        self.select_button.clicked.connect(self._select_image)
+        actions.addWidget(self.select_button)
 
-        action_row = QHBoxLayout()
-        self.action_button = QPushButton("Review request")
-        self.action_button.setProperty("class", "primary")
-        self.action_button.clicked.connect(self._confirm_sanitization)
-        action_row.addWidget(self.action_button)
-        action_row.addStretch(1)
-        layout.addLayout(action_row)
+        self.execute_button = QPushButton("Execute zero-overwrite")
+        self.execute_button.setEnabled(False)
+        self.execute_button.clicked.connect(self._confirm_and_execute)
+        actions.addWidget(self.execute_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
 
         self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setTextVisible(True)
         layout.addWidget(self.progress)
 
-        self.status_label = QLabel("No request submitted")
+        self.status_label = QLabel("No sanitization operation performed")
+        self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("color: #a7c0b7; font-size: 12px;")
         layout.addWidget(self.status_label)
         layout.addStretch(1)
 
-    def _confirm_sanitization(self):
-        if not self.target_check.isChecked() or not self.scope_check.isChecked():
-            self.status_label.setText("Confirm the target and scope before reviewing")
+    def _release_current_plan(self):
+        if self._plan is not None and not self._plan.closed:
+            self.engine.close_plan(self._plan)
+        self._plan = None
+
+    def _select_image(self):
+        if self._worker is not None and self._worker.isRunning():
             return
 
-        device = self.main_window.device_manager.get_selected_device()
-        dialog = SimulatedConfirmationDialog(
-            device["name"], self.method.currentText(), self.scope.currentText()
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select a Crypty disposable image file",
+            "",
+            "Disk image files (*.img *.dd *.raw *.bin);;All files (*)",
         )
-        if dialog.exec() != 1:
+        if not path:
             return
 
-        self.action_button.setEnabled(False)
-        self.status_label.setText("Authorization check")
-        self.progress.setValue(20)
-        self._simulate_steps()
+        self._release_current_plan()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.target_path_label.setText(path)
+        self.status_label.setText("Inspecting selected file read-only…")
+        self.execute_button.setEnabled(False)
 
-    def _simulate_steps(self):
-        from PySide6.QtCore import QTimer
+        try:
+            plan = self.engine.plan_image_file(path)
+        except Exception as error:
+            self.plan_details_label.setText(str(error))
+            self.status_label.setText("Could not create a sanitization plan")
+            return
 
-        self._steps = [
-            (30, "Authorization check"),
-            (45, "Target verification"),
-            (70, "Request validation"),
-            (90, "Verification"),
-            (100, "Audit record" if self.audit_check.isChecked() else "Simulation complete"),
-        ]
-        self._step_index = 0
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._advance_simulation)
-        self._timer.start(550)
+        self._plan = plan
+        if plan.capacity_bytes:
+            size = self._format_capacity(plan.capacity_bytes)
+        else:
+            size = "Unknown size"
+        self.plan_details_label.setText(
+            f"Plan status: {plan.status}  |  Size: {size}\n{plan.reason}"
+        )
 
-    def _advance_simulation(self):
-        if self._step_index >= len(self._steps):
-            self._timer.stop()
-            self.action_button.setEnabled(True)
-            self.status_label.setText("Request recorded  |  No device changes made")
+        if plan.ready:
+            self.execute_button.setEnabled(True)
+            self.status_label.setText(
+                "Plan ready. No file data has been changed. Review the target before execution."
+            )
+        else:
+            self.status_label.setText(
+                "Execution blocked. The target was not modified."
+            )
+
+    def _confirm_and_execute(self):
+        plan = self._plan
+        if plan is None or not plan.ready:
+            self.status_label.setText("There is no Ready sanitization plan to execute")
+            return
+
+        answer = QMessageBox.warning(
+            self,
+            "Irreversible file overwrite",
+            "This will overwrite every byte of the selected file with zeroes.\n\n"
+            f"Target: {plan.target_path}\n"
+            f"Size: {self._format_capacity(plan.capacity_bytes)}\n\n"
+            "Continue only if this is a disposable test image. This operation does not "
+            "establish physical-media sanitization assurance.",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        phrase, accepted = QInputDialog.getText(
+            self,
+            "Confirm destructive operation",
+            f"Type exactly: {CONFIRMATION_PHRASE}",
+            QLineEdit.Normal,
+        )
+        if not accepted:
+            return
+        if phrase != CONFIRMATION_PHRASE:
+            self.status_label.setText("Confirmation phrase did not match; no data was changed")
+            return
+
+        self.select_button.setEnabled(False)
+        self.execute_button.setEnabled(False)
+        self.progress.setRange(0, 0)
+        self.status_label.setText("Overwriting and verifying the image file…")
+
+        self._worker = _SanitizationWorker(self.engine, plan, phrase, self)
+        self._worker.finished_result.connect(self._on_execution_finished)
+        self._worker.failed.connect(self._on_execution_failed)
+        self._worker.start()
+
+    def _on_execution_finished(self, result: dict):
+        self.progress.setRange(0, 100)
+        self.select_button.setEnabled(True)
+        self.execute_button.setEnabled(False)
+
+        if result.get("successful"):
             self.progress.setValue(100)
-            return
+            self.status_label.setText(
+                "Completed: file bytes were overwritten and read-back verification passed. "
+                "This is not proof of physical-media sanitization."
+            )
+            self.plan_details_label.setText(
+                f"Bytes processed: {result.get('bytes_processed', 0):,}\n"
+                "Validation: Passed"
+            )
+        else:
+            self.progress.setValue(0)
+            self.status_label.setText(
+                f"Sanitization failed [{result.get('error_code', 'UNKNOWN')}]: "
+                f"{result.get('error_message', 'No further details available')}"
+            )
+        self._plan = None  # The service closed the native plan handle after execution.
 
-        value, message = self._steps[self._step_index]
-        self.progress.setValue(value)
-        self.status_label.setText(message)
-        self._step_index += 1
+    def _on_execution_failed(self, message: str):
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.select_button.setEnabled(True)
+        self.execute_button.setEnabled(False)
+        self.status_label.setText(f"Sanitization failed: {message}")
+        self._plan = None
+
+    @staticmethod
+    def _format_capacity(value: int) -> str:
+        amount = float(value)
+        for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+            if amount < 1024 or unit == "TiB":
+                return f"{amount:.2f} {unit}"
+            amount /= 1024
+        return f"{amount:.2f} TiB"
+
+    def closeEvent(self, event):
+        if self._worker is not None and self._worker.isRunning():
+            QMessageBox.information(
+                self,
+                "Sanitization in progress",
+                "Wait for the current sanitization operation to finish before closing this page.",
+            )
+            event.ignore()
+            return
+        self._release_current_plan()
+        super().closeEvent(event)

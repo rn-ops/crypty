@@ -541,3 +541,69 @@ sync later only if offline team workflows require it.
 For an initial contribution, start with test fixtures, clear error handling,
 read-only guarantees, report schemas, or documentation rather than enabling
 real-device sanitization.
+
+# Crypty physical-device inventory — step 1
+
+This patch adds a **read-only physical-device inventory**. It does not add a physical-device sanitization executor and does not make any physical-device plan executable.
+
+## Files
+
+- `core/includes/crypty/platform/device_inventory.hpp`: public inventory model and API.
+- `core/platform/device_inventory.hpp`: compatibility include for platform-internal code.
+- `core/platform/windows_device_inventory.cpp`: Windows PhysicalDrive enumeration using read-only storage IOCTLs.
+- `core/platform/posix_device_inventory.cpp`: Linux sysfs inventory; macOS currently returns `Unsupported` rather than inventing device records.
+- `tests/device_inventory_test.cpp`: basic result and metadata invariants.
+- `CMakeLists.txt`: registers the platform implementation and test.
+
+## Safety boundaries
+
+- Device discovery opens Windows physical drives with read access only. No write handle or sanitize command is issued.
+- Linux inventory reads `/sys/block` and related metadata only.
+- `stable_id` remains empty when a persistent identifier cannot be found; the current device path is not misrepresented as stable.
+- OS-volume membership and read-only status have explicit `*_known` flags. Unknown is not treated as false/safe.
+- Knowing the Windows directory volume does not prove that all EFI, recovery, pagefile, or other boot-critical volumes are absent from a device.
+- Inventory metadata does not prove support for ATA, SCSI, or NVMe sanitize commands.
+- `core/filesystem` detection is intentionally not called here: the inventory reports physical-device metadata, while the existing filesystem detector should be used in the subsequent partition/volume preflight layer.
+
+## Validation
+
+Validated in the Linux build environment:
+
+```sh
+cmake -S . -B build-check -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-check -j2
+ctest --test-dir build-check --output-on-failure
+```
+
+All 9 CTest tests passed. The Windows-specific implementation was not compiled in this Linux environment and must be verified with the repository's MSVC build before merging.
+
+# Crypty physical-device preflight — Step 2
+
+This patch builds on the sanitization integration and physical-device inventory patches.
+
+## Scope
+
+- Adds a read-only MBR/GPT partition-table scanner.
+- Validates partition bounds and overlap; validates GPT header and partition-array CRCs.
+- Marks MBR layouts with extended/logical partitions as partial instead of pretending the primary entries are complete.
+- Runs the existing `core/filesystem/detector.cpp` against each partition through the existing platform `read_media()` reader.
+- Uses `core/filesystem/VolumeInfo` to validate detected filesystem geometry against partition bounds.
+- Adds synthetic-reader tests for NTFS detection, GPT CRCs, invalid MBR bounds, and invalid GPT CRCs.
+
+## Safety boundary
+
+This is read-only inspection. `PhysicalDeviceInspection::execution_allowed` is always false. The result explicitly records that mounted-volume and boot-critical-volume checks are not yet implemented. No physical-device write method is added or enabled.
+
+## Apply
+
+Extract the ZIP into the repository root, preserving paths. It includes an updated `CMakeLists.txt` that assumes the prior sanitization integration and physical-device inventory patches are already present.
+
+Then run:
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+The patch was built and tested on Linux/GCC 14.2: all 10 CTest tests passed. Windows/MSVC still needs local verification.

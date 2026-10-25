@@ -18,10 +18,12 @@ set(CRYPTY_CXX_STANDARD 17)
 if(WIN32)
     set(CRYPTY_PLATFORM_SOURCE
         core/platform/windows_device_access.cpp
+        core/platform/windows_device_inventory.cpp
     )
 elseif(UNIX)
     set(CRYPTY_PLATFORM_SOURCE
         core/platform/posix_device_access.cpp
+        core/platform/posix_device_inventory.cpp
     )
 else()
     message(FATAL_ERROR
@@ -50,6 +52,7 @@ add_library(crypty_core STATIC
 target_compile_features(crypty_core PUBLIC
     cxx_std_${CRYPTY_CXX_STANDARD}
 )
+set_target_properties(crypty_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(crypty_core
     PUBLIC
@@ -73,6 +76,7 @@ add_library(crypty_platform STATIC
 target_compile_features(crypty_platform PUBLIC
     cxx_std_${CRYPTY_CXX_STANDARD}
 )
+set_target_properties(crypty_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(crypty_platform
     PUBLIC
@@ -87,17 +91,25 @@ target_include_directories(crypty_platform
 add_library(crypty_sanitization STATIC
     core/sanitization/policy_engine.cpp
     core/sanitization/sanitization_engine.cpp
+    core/sanitization/preflight.cpp
 )
 
 target_compile_features(crypty_sanitization PUBLIC
     cxx_std_${CRYPTY_CXX_STANDARD}
 )
+set_target_properties(crypty_sanitization PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(crypty_sanitization
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/core/includes"
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/core/sanitization"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/filesystem"
+)
+
+target_link_libraries(crypty_sanitization PUBLIC
+    crypty_core
+    crypty_platform
 )
 
 # --------------------------------------------------
@@ -182,6 +194,15 @@ if(BUILD_TESTING)
         COMMAND crypty_platform_read_test
     )
 
+    add_executable(crypty_device_inventory_test
+        tests/device_inventory_test.cpp
+    )
+    target_link_libraries(crypty_device_inventory_test PRIVATE crypty_platform)
+    add_test(
+        NAME crypty_device_inventory
+        COMMAND crypty_device_inventory_test
+    )
+
     add_executable(crypty_ntfs_boot_test
         tests/ntfs_boot_test.cpp
     )
@@ -228,6 +249,34 @@ if(BUILD_TESTING)
     add_test(
         NAME crypty_sanitization_execution
         COMMAND crypty_sanitization_execution_test
+    )
+
+    add_executable(crypty_sanitization_preflight_test
+        tests/sanitization_preflight_test.cpp
+    )
+    target_link_libraries(crypty_sanitization_preflight_test PRIVATE
+        crypty_sanitization
+    )
+    target_include_directories(crypty_sanitization_preflight_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/sanitization"
+    )
+    add_test(
+        NAME crypty_sanitization_preflight
+        COMMAND crypty_sanitization_preflight_test
+    )
+
+    add_executable(crypty_sanitization_native_bridge_test
+        tests/sanitization_native_bridge_test.cpp
+    )
+    target_link_libraries(crypty_sanitization_native_bridge_test
+        PRIVATE crypty_native
+    )
+    target_compile_features(crypty_sanitization_native_bridge_test
+        PRIVATE cxx_std_17
+    )
+    add_test(
+        NAME crypty_sanitization_native_bridge
+        COMMAND crypty_sanitization_native_bridge_test
     )
 endif()
 

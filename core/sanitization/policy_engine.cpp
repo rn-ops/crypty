@@ -71,11 +71,22 @@ SanitizationPlan PolicyEngine::create_plan(
         );
     }
 
-    if (target.kind == TargetKind::Unknown ||
+    if (target.kind == TargetKind::Unknown) {
+        return blocked_plan(
+            policy, target, PlanStatus::Unsupported,
+            "Target kind is unknown."
+        );
+    }
+
+    // A disk-image file is a logical file target. Its underlying physical
+    // medium may be unknown; that does not prevent planning file overwrite.
+    // Physical-device operations require a known media type before any
+    // media-specific method can be selected.
+    if (target.kind == TargetKind::PhysicalDevice &&
         target.media_type == MediaType::Unknown) {
         return blocked_plan(
             policy, target, PlanStatus::Unsupported,
-            "Target kind or media type is unknown."
+            "Physical-device media type is unknown; media-aware sanitization cannot be selected safely."
         );
     }
 
@@ -84,6 +95,13 @@ SanitizationPlan PolicyEngine::create_plan(
             return blocked_plan(
                 policy, target, PlanStatus::Blocked,
                 "An explicit disk-image path is required."
+            );
+        }
+
+        if (!target.target_identity.valid) {
+            return blocked_plan(
+                policy, target, PlanStatus::Blocked,
+                "A verified file identity must be captured during target inspection."
             );
         }
 
@@ -129,10 +147,13 @@ SanitizationPlan PolicyEngine::create_plan(
         return plan;
     }
 
-    // Physical-device execution is not implemented in this backend yet.
+    // Deliberately fail closed. Enumeration/read access does not imply that
+    // a device-specific sanitize command, its prerequisites, or its result
+    // verification are implemented. Do not mark a physical target Ready until
+    // a supported executor is registered for the exact media and method.
     return blocked_plan(
         policy, target, PlanStatus::Unsupported,
-        "Physical-device sanitization is not implemented."
+        "Physical-device sanitization is unavailable: no verified media-specific executor is registered for this target."
     );
 }
 

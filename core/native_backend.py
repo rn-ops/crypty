@@ -157,6 +157,39 @@ class NativeBackend:
         library.crypty_device_capacity.argtypes = [ctypes.c_size_t]
         library.crypty_device_capacity.restype = ctypes.c_uint64
 
+        # Native sanitization plan/execution API. The opaque handle owns the
+        # immutable target plan and its eventual execution result.
+        library.crypty_sanitization_plan_image_file.argtypes = [ctypes.c_char_p]
+        library.crypty_sanitization_plan_image_file.restype = ctypes.c_void_p
+        library.crypty_sanitization_plan_destroy.argtypes = [ctypes.c_void_p]
+        library.crypty_sanitization_plan_status.argtypes = [ctypes.c_void_p]
+        library.crypty_sanitization_plan_status.restype = ctypes.c_int
+        for name in ("crypty_sanitization_plan_reason", "crypty_sanitization_plan_path"):
+            getattr(library, name).argtypes = [ctypes.c_void_p]
+            getattr(library, name).restype = ctypes.c_char_p
+        library.crypty_sanitization_plan_capacity.argtypes = [ctypes.c_void_p]
+        library.crypty_sanitization_plan_capacity.restype = ctypes.c_uint64
+        library.crypty_sanitization_execute_image_file.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_uint64, ctypes.c_char_p,
+        ]
+        library.crypty_sanitization_execute_image_file.restype = ctypes.c_int
+        for name in (
+            "crypty_sanitization_result_executed",
+            "crypty_sanitization_result_successful",
+            "crypty_sanitization_result_execution_status",
+            "crypty_sanitization_result_validation_status",
+        ):
+            getattr(library, name).argtypes = [ctypes.c_void_p]
+            getattr(library, name).restype = ctypes.c_int
+        library.crypty_sanitization_result_bytes_processed.argtypes = [ctypes.c_void_p]
+        library.crypty_sanitization_result_bytes_processed.restype = ctypes.c_uint64
+        for name in (
+            "crypty_sanitization_result_error_code",
+            "crypty_sanitization_result_error_message",
+        ):
+            getattr(library, name).argtypes = [ctypes.c_void_p]
+            getattr(library, name).restype = ctypes.c_char_p
 
         library.crypty_workflow_file_created.argtypes = [
             ctypes.c_void_p,
@@ -249,6 +282,58 @@ class NativeBackend:
                 break
             amount /= 1024
         return f"{amount:.0f} {unit}"
+
+    def create_sanitization_plan(self, path: str) -> dict:
+        handle = self._library.crypty_sanitization_plan_image_file(
+            str(path).encode("utf-8")
+        )
+        if not handle:
+            raise RuntimeError("The native sanitization planner could not create a plan")
+
+        status = int(self._library.crypty_sanitization_plan_status(handle))
+        decode = lambda name: getattr(self._library, name)(handle).decode(
+            "utf-8", errors="replace"
+        )
+        return {
+            "_handle": int(handle),
+            "status": status,
+            "status_name": {0: "Ready", 1: "Unsupported", 2: "RequiresUserConfirmation", 3: "Blocked"}.get(status, "Unknown"),
+            "reason": decode("crypty_sanitization_plan_reason"),
+            "target_path": decode("crypty_sanitization_plan_path"),
+            "capacity_bytes": int(self._library.crypty_sanitization_plan_capacity(handle)),
+        }
+
+    def execute_sanitization_plan(
+        self,
+        plan_handle: int,
+        confirmed_path: str,
+        capacity_bytes: int,
+        confirmation_phrase: str,
+    ) -> dict:
+        handle = ctypes.c_void_p(plan_handle)
+        successful = bool(self._library.crypty_sanitization_execute_image_file(
+            handle,
+            1,
+            confirmed_path.encode("utf-8"),
+            capacity_bytes,
+            confirmation_phrase.encode("utf-8"),
+        ))
+        decode = lambda name: getattr(self._library, name)(handle).decode(
+            "utf-8", errors="replace"
+        )
+        return {
+            "executed": bool(self._library.crypty_sanitization_result_executed(handle)),
+            "successful": successful and bool(self._library.crypty_sanitization_result_successful(handle)),
+            "execution_status": int(self._library.crypty_sanitization_result_execution_status(handle)),
+            "validation_status": int(self._library.crypty_sanitization_result_validation_status(handle)),
+            "bytes_processed": int(self._library.crypty_sanitization_result_bytes_processed(handle)),
+            "error_code": decode("crypty_sanitization_result_error_code"),
+            "error_message": decode("crypty_sanitization_result_error_message"),
+        }
+
+    def destroy_sanitization_plan(self, plan_handle: int) -> None:
+        if plan_handle:
+            self._library.crypty_sanitization_plan_destroy(ctypes.c_void_p(plan_handle))
 
     def write_report(self, filename: str) -> bool:
         return bool(

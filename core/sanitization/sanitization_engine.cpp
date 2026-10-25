@@ -293,7 +293,7 @@ namespace crypty::sanitization {
       return failure(plan, "INVALID_PLAN", reason);
     }
 
-    const std::filesystem::path path(plan.target_path);
+    const std::filesystem::path path = std::filesystem::u8path(plan.target_path);
 
     #ifdef _WIN32
     // Open an existing file without allowing other handles to access it

@@ -85,14 +85,14 @@ void test_image_overwrite_cannot_claim_purge() {
     assert(plan.steps.empty());
 }
 
-void test_unknown_media_is_rejected() {
+void test_unknown_physical_media_is_rejected() {
     PolicyEngine engine;
     auto policy = make_policy(
         AssuranceLevel::Clear,
-        Method::ImageFileOverwrite
+        Method::Overwrite
     );
 
-    auto target = make_image_target();
+    auto target = make_physical_target();
     target.media_type = MediaType::Unknown;
 
     const auto plan = engine.create_plan(policy, target);
@@ -133,6 +133,36 @@ void test_method_must_be_permitted_and_available() {
     assert(plan.steps.empty());
 }
 
+void test_image_file_does_not_require_underlying_media_type() {
+    PolicyEngine engine;
+    auto policy = make_policy(
+        AssuranceLevel::Clear,
+        Method::ImageFileOverwrite
+    );
+    auto target = make_image_target();
+    target.media_type = MediaType::Unknown;
+
+    const auto plan = engine.create_plan(policy, target);
+
+    assert(plan.status == PlanStatus::Ready);
+    assert(plan.steps.size() == 1);
+}
+
+void test_image_file_requires_captured_identity() {
+    PolicyEngine engine;
+    auto policy = make_policy(
+        AssuranceLevel::Clear,
+        Method::ImageFileOverwrite
+    );
+    auto target = make_image_target();
+    target.target_identity.valid = false;
+
+    const auto plan = engine.create_plan(policy, target);
+
+    assert(plan.status == PlanStatus::Blocked);
+    assert(plan.steps.empty());
+}
+
 void test_physical_device_remains_blocked() {
     PolicyEngine engine;
     auto policy = make_policy(
@@ -165,9 +195,11 @@ void test_empty_policy_id_is_rejected() {
 int main() {
     test_clear_image_overwrite_is_plannable();
     test_image_overwrite_cannot_claim_purge();
-    test_unknown_media_is_rejected();
+    test_unknown_physical_media_is_rejected();
     test_image_path_is_required();
     test_method_must_be_permitted_and_available();
+    test_image_file_does_not_require_underlying_media_type();
+    test_image_file_requires_captured_identity();
     test_physical_device_remains_blocked();
     test_empty_policy_id_is_rejected();
 

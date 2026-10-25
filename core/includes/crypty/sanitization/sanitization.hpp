@@ -7,8 +7,10 @@
 
 namespace crypty::sanitization {
 
-// Phase 1 is intentionally a planning-only API. It does not open or modify
-// disk-image files or physical devices.
+// The policy API plans eligible disposable-image file overwrites. The native
+// executor independently inspects and validates the file before writing.
+// Physical-device sanitization remains unsupported until media-specific
+// executors and verification are implemented.
 class PolicyEngine;
 class SanitizationEngine;
 

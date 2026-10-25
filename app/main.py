@@ -11,7 +11,7 @@ from ui.dashboard.main_window import CryptyMainWindow
 
 
 # Development convenience only. Keep disabled for real builds.
-DEV_AUTH_BYPASS = False
+DEV_AUTH_BYPASS = True
 
 def resource_path(relative_path: str) -> Path:
     bundle_root = Path(

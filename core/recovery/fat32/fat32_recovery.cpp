@@ -10,7 +10,6 @@
 
 namespace crypty::recovery::fat32 {
 using crypty::filesystem::ReadAt;
-crypty::FileEntry;
 namespace {
 
 std::uint16_t u16(const std::uint8_t* value) {
