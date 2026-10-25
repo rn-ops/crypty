@@ -29,6 +29,21 @@ struct SanitizationStep {
     bool requires_validation = true;
 };
 
+
+struct FileIdentity {
+    bool valid = false;
+
+    // Windows: volume serial number.
+    // POSIX: device ID.
+    std::uint64_t volume_or_device_id = 0;
+
+    // Windows: file ID (low/high parts).
+    // POSIX: inode number.
+    std::uint64_t file_id_high = 0;
+    std::uint64_t file_id_low = 0;
+};
+
+
 struct SanitizationPlan {
     std::string plan_id;
     std::string device_id;
@@ -52,6 +67,8 @@ struct SanitizationPlan {
 
     bool requires_post_sanitization_validation = true;
     bool requires_audit_evidence = true;
+
+    FileIdentity target_identity;
 };
 
 } // namespace crypty::sanitization

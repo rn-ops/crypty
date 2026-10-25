@@ -26,6 +26,7 @@ SanitizationPlan blocked_plan(
     plan.policy_id = policy.policy_id;
     plan.target_kind = target.kind;
     plan.target_path = target.target_path;
+    plan.target_identity = target.target_identity;
     plan.media_type = target.media_type;
     plan.required_level = policy.required_level;
     plan.status = status;
@@ -108,6 +109,7 @@ SanitizationPlan PolicyEngine::create_plan(
         plan.policy_id = policy.policy_id;
         plan.target_kind = TargetKind::DiskImageFile;
         plan.target_path = target.target_path;
+        plan.target_identity = target.target_identity;
         plan.media_type = target.media_type;
         plan.required_level = policy.required_level;
         plan.target_capacity_bytes = target.capacity_bytes;

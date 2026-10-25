@@ -133,51 +133,101 @@ if(BUILD_TESTING)
     add_executable(crypty_workflow_test
         tests/workflow_test.cpp
     )
+
     target_link_libraries(crypty_workflow_test PRIVATE crypty_core)
-    add_test(NAME crypty_workflow COMMAND crypty_workflow_test)
+
+    add_test(
+        NAME crypty_workflow
+        COMMAND crypty_workflow_test
+    )
 
     add_executable(crypty_filesystem_test
         tests/filesystem_detector_test.cpp
     )
+
     target_link_libraries(crypty_filesystem_test PRIVATE crypty_core)
+
     target_include_directories(crypty_filesystem_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/core"
     )
-    add_test(NAME crypty_filesystem COMMAND crypty_filesystem_test)
+
+    add_test(
+        NAME crypty_filesystem
+        COMMAND crypty_filesystem_test
+    )
 
     add_executable(crypty_fat32_test
         tests/fat32_recovery_test.cpp
     )
+
     target_link_libraries(crypty_fat32_test PRIVATE crypty_core)
+
     target_include_directories(crypty_fat32_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/core"
     )
-    add_test(NAME crypty_fat32 COMMAND crypty_fat32_test)
+
+    add_test(
+        NAME crypty_fat32
+        COMMAND crypty_fat32_test
+    )
 
     add_executable(crypty_platform_read_test
         tests/platform_read_test.cpp
     )
+
     target_link_libraries(crypty_platform_read_test PRIVATE crypty_platform)
-    add_test(NAME crypty_platform_read COMMAND crypty_platform_read_test)
+
+    add_test(
+        NAME crypty_platform_read
+        COMMAND crypty_platform_read_test
+    )
 
     add_executable(crypty_ntfs_boot_test
         tests/ntfs_boot_test.cpp
     )
+
     target_link_libraries(crypty_ntfs_boot_test PRIVATE crypty_core)
+
     target_include_directories(crypty_ntfs_boot_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/core"
     )
-    add_test(NAME crypty_ntfs_boot COMMAND crypty_ntfs_boot_test)
 
+    add_test(
+        NAME crypty_ntfs_boot
+        COMMAND crypty_ntfs_boot_test
+    )
+
+    # Sanitization policy tests
     add_executable(crypty_sanitization_policy_test
         tests/sanitization_policy_test.cpp
     )
+
     target_link_libraries(crypty_sanitization_policy_test
         PRIVATE crypty_sanitization
     )
+
     add_test(
         NAME crypty_sanitization_policy
         COMMAND crypty_sanitization_policy_test
+    )
+
+    # Sanitization execution tests
+    add_executable(crypty_sanitization_execution_test
+        tests/sanitization_execution_test.cpp
+    )
+
+    target_link_libraries(crypty_sanitization_execution_test
+        PRIVATE crypty_sanitization
+    )
+
+    target_include_directories(crypty_sanitization_execution_test
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/core/sanitization"
+    )
+
+    add_test(
+        NAME crypty_sanitization_execution
+        COMMAND crypty_sanitization_execution_test
     )
 endif()
 

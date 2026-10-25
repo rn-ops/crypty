@@ -30,6 +30,14 @@ SanitizationTarget make_image_target() {
     target.media_type = MediaType::HDD;
     target.capacity_bytes = 1024 * 1024;
     target.available_methods = {Method::ImageFileOverwrite};
+
+    target.target_identity.valid = true;
+    target.target_identity.volume_or_device_id = 1;
+    target.target_identity.file_id_high = 0;
+    target.target_identity.file_id_low = 42;
+
+
+
     return target;
 }
 
@@ -59,6 +67,9 @@ void test_clear_image_overwrite_is_plannable() {
     assert(plan.steps[0].method == Method::ImageFileOverwrite);
     assert(plan.requires_post_sanitization_validation);
     assert(plan.requires_audit_evidence);
+    assert(plan.target_identity.valid);
+    assert(plan.target_identity.volume_or_device_id == 1);
+    assert(plan.target_identity.file_id_low == 42);
 }
 
 void test_image_overwrite_cannot_claim_purge() {

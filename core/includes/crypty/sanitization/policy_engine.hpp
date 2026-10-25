@@ -22,6 +22,8 @@ struct SanitizationTarget {
 
     // Methods confirmed as available for this target.
     std::vector<Method> available_methods;
+    
+    FileIdentity target_identity;
 };
 
 class PolicyEngine {
