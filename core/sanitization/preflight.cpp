@@ -360,6 +360,27 @@ PhysicalDeviceInspection inspect_physical_device(
     result.execution_allowed = false;
     result.blockers.push_back("This inspection is read-only and never authorizes physical-device sanitization.");
 
+    switch (device.protection_status) {
+    case crypty::platform::DeviceProtectionStatus::Protected:
+        result.blockers.push_back(
+            "The device backs protected host storage.");
+        break;
+
+    case crypty::platform::DeviceProtectionStatus::Unknown:
+        result.blockers.push_back(
+            "Host-storage protection status could not be established.");
+        break;
+
+    case crypty::platform::DeviceProtectionStatus::Eligible:
+        break;
+    }
+
+    for (const auto& reason : device.protection_reasons) {
+        if (!reason.empty()) {
+            result.blockers.push_back(reason);
+        }
+    }
+
     if (device.device_path.empty() || device.capacity_bytes == 0 ||
         device.logical_sector_size == 0 || !read_at) {
         result.status = InspectionStatus::Failed;

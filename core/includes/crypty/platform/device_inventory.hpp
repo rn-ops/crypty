@@ -13,6 +13,12 @@ enum class DeviceInventoryStatus {
     Failed
 };
 
+enum class DeviceProtectionStatus {
+    Unknown,
+    Protected,
+    Eligible
+};
+
 // Read-only inventory metadata. This type does not imply that a device is
 // eligible for sanitization or that any sanitization method is supported.
 struct PhysicalDeviceInfo {
@@ -48,6 +54,21 @@ struct PhysicalDeviceInfo {
 
     // False when some metadata could not be queried for this device.
     bool metadata_complete = false;
+
+    // Shared safety classification. Platform discovery must establish this;
+    // the default is deliberately fail-closed.
+    DeviceProtectionStatus protection_status =
+        DeviceProtectionStatus::Unknown;
+
+    // Human-readable reasons for protecting or blocking the device.
+    std::vector<std::string> protection_reasons;
+
+    // Mounted volumes associated with this physical device.
+    std::vector<std::string> mounted_volume_paths;
+
+    // True only when all required host-storage dependencies were checked.
+    // False means an unprotected classification must not be inferred.
+    bool protection_discovery_complete = false;
 };
 
 struct DeviceInventoryResult {

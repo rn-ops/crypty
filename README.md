@@ -607,3 +607,68 @@ ctest --test-dir build -C Debug --output-on-failure
 ```
 
 The patch was built and tested on Linux/GCC 14.2: all 10 CTest tests passed. Windows/MSVC still needs local verification.
+
+# Sanitization frontend/backend boundary
+
+The sanitization page is a client of `SanitizationEngine`, not of the native C ABI.
+
+## Stable page contract
+- `capabilities()` returns target and method descriptors.
+- `list_targets(kind)` returns selectable targets for non-file selectors.
+- `plan_target(target, method_id)` returns a `SanitizationPlanHandle`.
+- `execute_plan(plan, authorization)` returns a normalized result and releases the native handle.
+- `close_plan(plan)` releases an unconsumed plan.
+
+When the native backend gains new target kinds, methods, planning steps, blockers, validation outcomes, audit fields, or operation IDs, adapt those details in `core/sanitization_engine.py`. The page already renders optional fields without depending on the native ABI.
+
+## Important current limits
+The current native bridge supports disposable image-file plans. The physical-device target remains disabled unless a future capability provider explicitly advertises it. The adapter also requires the matching backend methods before a new target can be planned or executed. Do not simply enable the physical-device dropdown before the backend safety preflight is complete.
+
+
+# Crypty physical-device protection discovery - Step 3
+
+## Included changes
+
+- Adds `PhysicalDeviceInfo::protection_discovery_complete`, defaulting to `false`.
+- Windows inventory enumerates volume GUIDs read-only, maps volumes to physical disk numbers through `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`, and records mounted paths where available.
+- Marks the Windows directory volume and the volume hosting the running Crypty executable as `Protected` when their disk mappings are known.
+- Leaves every other disk `Unknown`; this step does not classify any physical device as `Eligible`.
+- Marks discovery incomplete when any required volume/device query fails. Existing preflight should continue to block physical execution.
+
+## Safety and limitations
+
+This is a conservative intermediate step, not a complete host-storage dependency audit. EFI/boot, recovery, pagefile, crash-dump, hibernation, Storage Spaces, dynamic disks, and other platform-specific dependencies still need explicit handling and validation. A failed query intentionally prevents a complete-discovery claim. Do not enable physical writes based on this step.
+
+The Windows implementation was prepared from the supplied source file but has **not** been compiled with MSVC in this environment. Apply on a branch, then run the Windows build and focused tests before merging.
+
+## Apply
+
+Extract the ZIP at the Crypty repository root, preserving paths. Review the diff first; retain any local changes.
+
+```powershell
+cmake --build .\build --config Debug
+ctest --test-dir .\build -C Debug --output-on-failure -R "device_inventory|sanitization_preflight|sanitization_execution"
+```
+# Crypty physical-device protection discovery — Step 4
+
+## Changes
+
+- Adds read-only partition-layout inspection for physical disks.
+- Marks disks containing a GPT EFI System Partition, GPT Microsoft Recovery partition, or active MBR partition as protected.
+- Keeps physical-device eligibility disabled and `protection_discovery_complete` false.
+- Treats failures to inspect a present physical disk as incomplete inventory.
+
+## Important limits
+
+This is still a conservative intermediate step. It does not fully identify pagefile, crash-dump, hibernation, Storage Spaces/dynamic-disk dependencies, boot configuration edge cases, or every vendor-specific storage topology. A partition type is a useful protection signal, not proof that all host dependencies have been discovered. Do not enable physical writes based on this patch.
+
+## Apply and test
+
+Extract the ZIP at the Crypty repository root, review the diff, and preserve unrelated local changes. The Windows/MSVC build has not been run in this environment.
+
+```powershell
+cmake --build .\build --config Debug
+ctest --test-dir .\build -C Debug --output-on-failure -R "device_inventory|sanitization_preflight|sanitization_execution"
+```
+
+If the build fails, send the complete compiler output before proceeding.
