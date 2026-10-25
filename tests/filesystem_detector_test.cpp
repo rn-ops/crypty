@@ -1,5 +1,5 @@
 
-#include "detector.hpp"
+#include "filesystem/detector.hpp"
 
 #include <array>
 #include <cassert>

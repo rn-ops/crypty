@@ -1,5 +1,5 @@
 
-#include "../core/recovery/fat32/fat32_recovery.hpp"
+#include "recovery/fat32/fat32_recovery.hpp"
 
 #include <cassert>
 #include <cstdint>

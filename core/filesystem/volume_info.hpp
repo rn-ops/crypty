@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include "types.hpp"
+#include <crypty/filesystem/types.hpp>
 #include <cstdint>
 
 namespace crypty::filesystem {

@@ -1,9 +1,9 @@
 
 #pragma once
 
-#include "../../reader.hpp"
-#include "../../types.hpp"
-#include "../../src/workflow.hpp"
+#include <crypty/filesystem/reader.hpp>
+#include <crypty/filesystem/types.hpp>
+#include <crypty/workflow.hpp>
 
 #include <cstdint>
 #include <vector>

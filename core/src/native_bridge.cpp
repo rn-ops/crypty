@@ -1,5 +1,5 @@
-#include "workflow.hpp"
-#include "../device_access.hpp"
+#include <crypty/workflow.hpp>
+#include <crypty/platform/device_access.hpp>
 #include "../reporting/report.hpp"
 #include "../recovery/recovery_engine.hpp"
 

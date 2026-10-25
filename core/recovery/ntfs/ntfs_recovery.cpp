@@ -3,8 +3,8 @@
 #include "data_attribute.hpp"
 #include "runlist.hpp"
 
-#include "../../reader.hpp"
-#include "../../src/workflow.hpp"
+#include <crypty/filesystem/reader.hpp>
+#include <crypty/workflow.hpp>
 
 #include <algorithm>
 #include <cstddef>  

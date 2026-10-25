@@ -1,4 +1,4 @@
-#include "workflow.hpp"
+#include <crypty/workflow.hpp>
 #include <filesystem>
 namespace crypty {
 Workflow::Workflow() { data_.target.path = "."; add_event("SESSION_OPENED", "Operator workspace initialized"); add_event("AUTH_BYPASSED", "Demo placeholder acknowledged"); add_event("ENGINE_READY", "Demo engine ready"); }

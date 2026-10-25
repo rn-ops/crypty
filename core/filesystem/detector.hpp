@@ -1,8 +1,8 @@
 
 #pragma once
 
-#include "reader.hpp"
-#include "types.hpp"
+#include <crypty/filesystem/reader.hpp>
+#include <crypty/filesystem/types.hpp>
 
 namespace crypty::filesystem {
 

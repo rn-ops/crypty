@@ -186,9 +186,9 @@ as released product capabilities.
 - `core/native_backend.py` and `core/src/native_bridge.cpp`: Python-to-native
   boundary. Keep it narrow and typed; avoid implementing product policy in
   both languages.
-- `core/device_access.hpp` and `core/platform/`: platform-neutral storage
-  interface and OS-specific enumeration/read adapters. The native algorithms
-  should consume bounded reads and remain independent of OS handles.
+- `core/includes/crypty/` is the single public native header/API tree.
+  `core/platform/` contains OS-specific enumeration/read adapters, while
+  private implementation headers stay with their `.cpp` files.
 - `auth/`: separate Flask authentication API, its database/models, and
   development utilities.
 - `tests/`: C++ workflow, filesystem detection, FAT32 recovery, NTFS boot
@@ -200,6 +200,101 @@ The Python recovery and sanitization engine classes are currently thin
 facades. The presence of a UI page or native source file does not by itself
 mean an end-to-end, production-safe workflow exists. Platform adapters are a
 first portability step, not proof of validated cross-platform operation.
+
+## Project structure
+
+This tree highlights the source files contributors are most likely to work
+in. Comments describe each path's responsibility, not a claim that every
+planned capability is complete.
+
+```text
+crypty/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                     # Cross-platform build, test, and Python checks
+├── app/
+│   └── main.py                        # Desktop entry point and application composition
+├── auth/
+│   └── api/
+│       ├── app.py                      # Flask authentication API startup and routes
+│       ├── auth_utils.py               # Password/token helpers
+│       ├── audit.py                    # Authentication audit logging
+│       ├── rbac.py                     # Role-based access decisions
+│       ├── face_auth.py                # Optional face-auth flows; not core recovery
+│       ├── database/
+│       │   └── db.py                   # SQLite connection and schema setup
+│       ├── tests/                      # Authentication API tests and fixtures
+│       └── requirements.txt            # Authentication-service dependencies
+├── core/
+│   ├── __init__.py                     # Python package marker
+│   ├── backend.py                      # Simulated/demo backend
+│   ├── device_manager.py               # Device discovery and active selection
+│   ├── native_backend.py               # Python ctypes adapter for the native library
+│   ├── recovery_engine.py              # Python recovery orchestration facade
+│   ├── sanitization_engine.py          # Python sanitization orchestration facade
+│   ├── includes/                       # The one public C++ header tree
+│   │   └── crypty/
+│   │       ├── workflow.hpp            # Workflow types and public C++ workflow API
+│   │       ├── filesystem/
+│   │       │   ├── reader.hpp          # Bounded random-access reader contract
+│   │       │   └── types.hpp           # Filesystem metadata and detection types
+│   │       └── platform/
+│   │           └── device_access.hpp   # Platform-neutral storage-device contract
+│   ├── filesystem/
+│   │   ├── detector.cpp/.hpp           # Internal filesystem detection implementation
+│   │   └── volume_info.cpp/.hpp        # Internal validated-geometry helpers
+│   ├── platform/
+│   │   ├── windows_device_access.cpp   # Windows volume discovery and read-only access
+│   │   └── posix_device_access.cpp     # Linux/macOS volume discovery and read-only access
+│   ├── recovery/
+│   │   ├── recovery_engine.cpp/.hpp    # Filesystem dispatch and recovery orchestration
+│   │   ├── fat32/                      # FAT32 deleted-entry scan and recovery
+│   │   ├── exfat/                      # exFAT deleted-entry scan
+│   │   └── ntfs/                       # NTFS MFT, attributes, runlists, and scan
+│   ├── reporting/
+│   │   └── report.cpp/.hpp             # Native operation report serialization
+│   ├── sanitization/
+│   │   └── sanitization_engine.cpp/.hpp # Native sanitization orchestration; incomplete
+│   └── src/
+│       ├── native_bridge.cpp            # C ABI boundary exported to Python
+│       └── workflow.cpp                 # Workflow state and in-memory events
+├── data/
+│   └── demo_data.py                    # Clearly labeled sample/demo content
+├── docs/                               # Product and engineering documentation
+├── resources/
+│   └── crypty.ico                      # Windows application icon
+├── tests/
+│   ├── workflow_test.cpp               # Workflow-state tests
+│   ├── filesystem_detector_test.cpp    # Filesystem detection fixtures
+│   ├── fat32_recovery_test.cpp          # FAT32 recovery tests
+│   ├── ntfs_boot_test.cpp               # NTFS boot-sector geometry tests
+│   └── platform_read_test.cpp           # Read-only image-file access test
+├── ui/
+│   ├── auth/                            # Desktop login and saved-account UI
+│   ├── dashboard/                       # Workspace, devices, recovery, sanitization, reports
+│   └── styles.py                        # Shared desktop styling
+├── website/
+│   ├── index.html                       # Static product website
+│   ├── styles.css                       # Website presentation
+│   ├── script.js                        # Website interactions
+│   ├── README.txt                       # Website run instructions and limitations
+│   └── bot/                             # Optional local website chat service
+├── CMakeLists.txt                       # Native targets, OS adapter selection, CTest
+├── Crypty.spec                          # PyInstaller folder-bundle recipe
+├── build_native.py                      # CMake-based native build helper
+├── auth_client.py                       # Desktop client for the auth API
+├── makefile                             # Common local developer shortcuts
+├── requirements.txt                     # Desktop Python dependencies
+└── README.md                            # Onboarding, setup, architecture, and MVP plan
+```
+
+`app/main.py` is intentionally a small entry point; screens belong in `ui/`,
+native orchestration and domain code in `core/`, and account service code in
+`auth/`. Keep OS APIs in `core/platform/`. Some directories (such as
+`core/evidence/` and `core/storage/`) are reserved or currently contain no
+implemented source; add files there only when a concrete responsibility and
+tests exist. Build outputs, virtual environments, local databases, credentials,
+and acquired evidence should not be committed.
 
 ## Cross-platform core MVP roadmap
 
