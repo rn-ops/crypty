@@ -1,10 +1,12 @@
 import os
 
 from PySide6.QtCore import Qt, Signal
+from auth_client import AuthenticationError
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QSplitter,
     QTreeWidget,
@@ -55,6 +57,7 @@ class WorkspaceHeader(QFrame):
             ("sanitization", "Sanitization"),
             ("evidence", "Evidence"),
             ("reports", "Reports & Audit"),
+            ("audit", "Audit Log"),
             ("settings", "Settings"),
         ]
         for key, label in labels:
@@ -80,10 +83,11 @@ class WorkspaceHeader(QFrame):
 class MediaSidebar(QSplitter):
     device_selected = Signal(object)
 
-    def __init__(self, session, device_manager, active_device=None):
+    def __init__(self, session, device_manager, active_device=None, auth_client=None):
         super().__init__(Qt.Vertical)
 
         self.session = session
+        self.auth_client = auth_client
         self.device_manager = device_manager
         self.active_device = active_device
 
@@ -208,8 +212,8 @@ class MediaSidebar(QSplitter):
             QLabel(f"{self.session.username}\n{self.session.role}")
         )
 
-        account_button = QPushButton("Accounts (coming soon)")
-        account_button.setEnabled(False)
+        account_button = QPushButton("Account & Plan")
+        account_button.clicked.connect(self._show_account)
         details_layout.addWidget(account_button)
         details_layout.addStretch(1)
 
@@ -222,6 +226,26 @@ class MediaSidebar(QSplitter):
         self.active_device = device
         self.refresh()
         self.device_context_label.setText(device.get("name", "Selected media") if device else "No media selected")
+
+    def _show_account(self):
+        if not self.auth_client:
+            QMessageBox.warning(self, "Account unavailable", "The account service is not configured.")
+            return
+        try:
+            account = self.auth_client.get_account_profile(self.session)
+        except AuthenticationError as error:
+            QMessageBox.critical(self, "Could not load account", str(error))
+            return
+        plan = account.get("plan") or {}
+        QMessageBox.information(
+            self,
+            "Crypty account",
+            f"Account: {account.get('username', self.session.username)}\n"
+            f"Email: {account.get('email') or 'Not provided'}\n"
+            f"Role: {account.get('role', self.session.role)}\n"
+            f"Plan: {plan.get('name') or plan.get('id') or 'No plan assigned'}\n"
+            f"Plan status: {plan.get('status', 'unknown')}",
+        )
 
     def set_case_context(self, case_name=None):
         self.case_context_label.setText(case_name or "No case selected")

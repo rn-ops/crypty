@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QFrame, QMainWindow, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QMainWindow, QMessageBox, QSplitter, QVBoxLayout, QWidget
 
-from auth_client import AuthSession
+from auth_client import AuthClient, AuthSession, AuthenticationError
 from core.native_backend import NativeBackend
 from core.device_manager import DeviceManager
 from core.recovery_engine import RecoveryEngine
@@ -29,6 +29,7 @@ class CryptyMainWindow(QMainWindow):
         self.setMinimumSize(900, 620)
         self.setStyleSheet(APP_STYLESHEET)
 
+        self.auth_client = AuthClient()
         self.backend = NativeBackend()
         self.device_manager = DeviceManager(self.backend)
         self.recovery_engine = RecoveryEngine(self.backend)
@@ -55,7 +56,12 @@ class CryptyMainWindow(QMainWindow):
         body.setChildrenCollapsible(False)
         body.setHandleWidth(5)
         self.body_splitter = body
-        self.sidebar = MediaSidebar(self.session, self.device_manager, self.active_device)
+        self.sidebar = MediaSidebar(
+            self.session,
+            self.device_manager,
+            self.active_device,
+            self.auth_client,
+        )
         self.sidebar.device_selected.connect(self.set_active_device)
         self.sidebar.hide()
         body.addWidget(self.sidebar)
@@ -110,6 +116,8 @@ class CryptyMainWindow(QMainWindow):
             self.pages["cases"]._sync_context()
         if "evidence" in self.pages and hasattr(self.pages["evidence"], "on_show"):
             self.pages["evidence"].on_show()
+        if case:
+            self._record_audit_event("CASE_SELECTED", f"Selected case '{name}'.", case=case)
 
     def set_active_device(self, device):
         self.active_device = device
@@ -122,6 +130,55 @@ class CryptyMainWindow(QMainWindow):
         for page in self.pages.values():
             if hasattr(page, "refresh_device_context"):
                 page.refresh_device_context()
+        if device and self.active_case:
+            try:
+                fingerprint = self.auth_client.device_fingerprint(device)
+                attached = {
+                    item.get("identity")
+                    for item in self.active_case.get("devices", [])
+                }
+                if fingerprint in attached:
+                    self._record_audit_event(
+                        "DEVICE_SELECTED",
+                        f"Selected device '{device.get('name', 'Unnamed media')}'.",
+                        case=self.active_case,
+                        device_fingerprint=fingerprint,
+                    )
+            except ValueError as error:
+                QMessageBox.warning(self, "Audit event not recorded", str(error))
+
+    def _record_audit_event(
+        self,
+        action: str,
+        details: str,
+        case: dict | None = None,
+        device_fingerprint: str | None = None,
+    ):
+        try:
+            self.record_audit_event(
+                action, details, case=case, device_fingerprint=device_fingerprint
+            )
+        except (AuthenticationError, ValueError) as error:
+            QMessageBox.warning(
+                self,
+                "Audit event not recorded",
+                str(error),
+            )
+
+    def record_audit_event(
+        self,
+        action: str,
+        details: str,
+        case: dict | None = None,
+        device_fingerprint: str | None = None,
+    ):
+        self.auth_client.record_audit_event(
+            self.session,
+            action,
+            details,
+            case=case,
+            device_fingerprint=device_fingerprint,
+        )
 
     def report_evidence_page(self, page_hash, event):
         self.footer.update_status(event=event, page_hash=page_hash)

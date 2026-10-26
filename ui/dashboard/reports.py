@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from PySide6.QtCore import Qt
+from auth_client import AuthenticationError
 
 
 class ReportsPage(QWidget):
@@ -75,7 +76,7 @@ class ReportsPage(QWidget):
             f"{inspection.get('total_bytes', 'Pending')} bytes indexed"
         ))
         stats_layout.addWidget(QLabel("INTEGRITY\nPending verification"))
-        stats_layout.addWidget(QLabel(f"AUDIT\n{len(self.main_window.backend.audit_events())} events recorded"))
+        stats_layout.addWidget(QLabel(f"NATIVE WORKFLOW\n{len(self.main_window.backend.audit_events())} local operation events"))
         report_columns = QHBoxLayout()
         report_columns.setSpacing(16)
         report_columns.addWidget(summary, 3)
@@ -101,9 +102,15 @@ class ReportsPage(QWidget):
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         layout.addWidget(title)
 
-        integrity = QLabel("AUDIT INTEGRITY\nVALID")
-        integrity.setStyleSheet("color: #a8d9d3; font-size: 11px; letter-spacing: 0.10em; border: 1px solid #2b363d; background: #171c1f; padding: 6px 10px;")
-        layout.addWidget(integrity)
+        toolbar = QHBoxLayout()
+        self.integrity = QLabel("Audit integrity has not been verified.")
+        self.integrity.setWordWrap(True)
+        self.integrity.setStyleSheet("color: #a8d9d3; font-size: 11px; border: 1px solid #2b363d; background: #171c1f; padding: 6px 10px;")
+        toolbar.addWidget(self.integrity, 1)
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self._refresh_audit_log)
+        toolbar.addWidget(refresh)
+        layout.addLayout(toolbar)
 
         self.audit_log_panel = QFrame()
         log_panel = self.audit_log_panel
@@ -111,16 +118,55 @@ class ReportsPage(QWidget):
         log_layout = QVBoxLayout(log_panel)
         log_layout.setContentsMargins(18, 16, 18, 16)
         log_layout.setSpacing(12)
-
-        for event in self.main_window.backend.audit_events():
-            line = QLabel(
-                f"{event['action']}\n{event['message']}"
-            )
-            line.setStyleSheet("font-family: 'Consolas'; font-size: 12px; line-height: 1.8; border-bottom: 1px solid #2b363d; padding-bottom: 6px;")
-            log_layout.addWidget(line)
+        self.audit_entries_layout = log_layout
+        self._render_audit_logs([])
 
         layout.addWidget(log_panel)
         layout.addStretch(1)
+
+    def _render_audit_logs(self, entries):
+        while self.audit_entries_layout.count():
+            item = self.audit_entries_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not entries:
+            empty = QLabel("No account audit entries are available.")
+            empty.setWordWrap(True)
+            empty.setStyleSheet("color:#a7a5ac;border:none;")
+            self.audit_entries_layout.addWidget(empty)
+            return
+        for event in entries:
+            line = QLabel(
+                f"{event.get('timestamp', '')}  ·  {event.get('action', '')}\n"
+                f"Account: {event.get('account') or '—'}  ·  Plan: {event.get('account_plan') or '—'}\n"
+                f"Case: {event.get('case_name') or '—'} ({event.get('case_id') or '—'})\n"
+                f"Device fingerprint: {event.get('device_fingerprint') or '—'}\n"
+                f"{event.get('details') or ''}"
+            )
+            line.setWordWrap(True)
+            line.setStyleSheet("font-family: 'Consolas'; font-size: 11px; border-bottom: 1px solid #2b363d; padding-bottom: 8px;")
+            self.audit_entries_layout.addWidget(line)
+
+    def _refresh_audit_log(self):
+        try:
+            entries = self.main_window.auth_client.get_audit_logs(
+                self.main_window.session
+            )
+            integrity = self.main_window.auth_client.verify_audit_log(
+                self.main_window.session
+            )
+        except AuthenticationError as error:
+            self.integrity.setText(f"Audit service error: {error}")
+            self.integrity.setStyleSheet("color:#e58b83;font-size:11px;border:1px solid #2b363d;background:#171c1f;padding:6px 10px;")
+            self._render_audit_logs([])
+            return
+        self.integrity.setText(integrity.get("message", "Integrity result unavailable."))
+        self.integrity.setStyleSheet(
+            "color:#a8d9d3;font-size:11px;border:1px solid #2b363d;background:#171c1f;padding:6px 10px;"
+            if integrity.get("valid")
+            else "color:#e58b83;font-size:11px;border:1px solid #2b363d;background:#171c1f;padding:6px 10px;"
+        )
+        self._render_audit_logs(entries)
 
     def _preview_report(self):
         device = self.main_window.device_manager.get_selected_device()
@@ -156,15 +202,4 @@ class ReportsPage(QWidget):
 
     def on_show(self):
         if self.audit_only:
-            layout = self.audit_log_panel.layout()
-            while layout.count():
-                item = layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            for event in self.main_window.backend.audit_events():
-                line = QLabel(f"{event['action']}\n{event['message']}")
-                line.setStyleSheet(
-                    "font-family: 'Consolas'; font-size: 12px; "
-                    "border-bottom: 1px solid #2b363d; padding-bottom: 6px;"
-                )
-                layout.addWidget(line)
+            self._refresh_audit_log()

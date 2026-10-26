@@ -1,6 +1,9 @@
-import os
 import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
@@ -9,9 +12,6 @@ from auth_client import AuthClient, AuthSession
 from ui.auth.auth_window import AuthWindow
 from ui.dashboard.main_window import CryptyMainWindow
 
-
-# Development convenience only. Keep disabled for real builds.
-DEV_AUTH_BYPASS = True
 
 def resource_path(relative_path: str) -> Path:
     bundle_root = Path(
@@ -45,18 +45,7 @@ def main() -> int:
         auth_window.close()
 
     auth_window.authenticated.connect(open_workspace)
-
-    if DEV_AUTH_BYPASS:
-        # Never send hardcoded credentials to the API.
-        # Do not enable this in production builds.
-        session = AuthSession(
-            username="admin1",
-            role="admin",
-            token="a",
-        )
-        open_workspace(session)
-    else:
-        auth_window.show()
+    auth_window.show()
 
     return app.exec()
 

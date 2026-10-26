@@ -1,0 +1,7 @@
+node_modules
+.next
+.env.local
+auth-api/.env
+auth-api/database/*.db
+auth-api/database/*.bak
+__pycache__

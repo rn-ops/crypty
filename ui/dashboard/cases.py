@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime
-from pathlib import Path
-
-from PySide6.QtCore import Qt, QStandardPaths
+from auth_client import AuthenticationError
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
@@ -13,36 +9,24 @@ from PySide6.QtWidgets import (
 
 
 class CasesPage(QWidget):
-    """Case register and case context. Cases persist locally as JSON metadata."""
+    """Case register and case context backed by the account service."""
 
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
         self.cases: list[dict] = []
         self.active_case_id: str | None = None
-        self.store_path = self._store_path()
+        self.sync_error: str | None = None
         self._load_cases()
         self._build_ui()
         self._render_cases()
 
-    def _store_path(self) -> Path:
-        root = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-        path = Path(root or str(Path.home() / ".crypty")) / "cases.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
-
     def _load_cases(self):
         try:
-            data = json.loads(self.store_path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                self.cases = [x for x in data if isinstance(x, dict) and x.get("id")]
-        except (OSError, json.JSONDecodeError):
+            self.cases = self.main_window.auth_client.list_cases(self.main_window.session)
+        except AuthenticationError as error:
             self.cases = []
-
-    def _save_cases(self):
-        temp = self.store_path.with_suffix(".tmp")
-        temp.write_text(json.dumps(self.cases, indent=2, ensure_ascii=False), encoding="utf-8")
-        temp.replace(self.store_path)
+            self.sync_error = str(error)
 
     def _panel(self, title: str, subtitle: str = ""):
         frame = QFrame()
@@ -125,11 +109,33 @@ class CasesPage(QWidget):
         columns.addWidget(active_panel, 2)
         outer.addLayout(columns)
 
-        register_panel, register_layout = self._panel("Case register", "Cases are stored locally on this machine. This prototype does not yet provide a multi-user case database.")
+        register_panel, register_layout = self._panel("Case register", "Cases and attached-device fingerprints are stored in the Crypty account database.")
+        self.sync_status = QLabel("")
+        self.sync_status.setWordWrap(True)
+        self.sync_status.setStyleSheet("font-size:11px;color:#e58b83;border:none;")
+        register_layout.addWidget(self.sync_status)
+        refresh = QPushButton("Refresh case register")
+        refresh.clicked.connect(self._refresh_cases)
+        register_layout.addWidget(refresh)
         self.case_list_layout = QVBoxLayout()
         self.case_list_layout.setSpacing(6)
         register_layout.addLayout(self.case_list_layout)
         outer.addWidget(register_panel, 1)
+        if self.sync_error:
+            self.sync_status.setText("Case service unavailable: " + self.sync_error)
+
+    def _refresh_cases(self):
+        try:
+            self.cases = self.main_window.auth_client.list_cases(self.main_window.session)
+            self.sync_error = None
+            self.sync_status.setText("Cases synchronized with the account database.")
+            if self.active_case_id not in {case["id"] for case in self.cases}:
+                self.active_case_id = None
+            self._render_cases()
+            self._sync_context()
+        except AuthenticationError as error:
+            self.sync_error = str(error)
+            self.sync_status.setText("Case service unavailable: " + self.sync_error)
 
     def _create_case(self):
         name = self.name_input.text().strip()
@@ -137,19 +143,24 @@ class CasesPage(QWidget):
             QMessageBox.information(self, "Case name required", "Enter a case or job name first.")
             self.name_input.setFocus()
             return
-        case = {
-            "id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
+        case_data = {
             "name": name,
             "category": self.category_input.currentText().strip(),
             "reference": self.reference_input.text().strip(),
             "operator": self.operator_input.text().strip(),
             "scope": self.scope_input.toPlainText().strip(),
-            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "devices": [],
         }
+        try:
+            case = self.main_window.auth_client.create_case(
+                self.main_window.session, case_data
+            )
+        except AuthenticationError as error:
+            QMessageBox.critical(self, "Case creation failed", str(error))
+            return
         self.cases.insert(0, case)
         self.active_case_id = case["id"]
-        self._save_cases()
+        self.sync_error = None
+        self.sync_status.setText("Case saved to the account database.")
         self.name_input.clear()
         self.reference_input.clear()
         self.scope_input.clear()
@@ -217,28 +228,35 @@ class CasesPage(QWidget):
         if not case or not device:
             QMessageBox.information(self, "Select a case and source", "Create/select a case, then choose a device in Media Explorer.")
             return
-        identity = str(device.get("id") or device.get("path") or device.get("name") or "")
-        if not identity:
-            QMessageBox.warning(self, "Missing source identity", "The selected device does not expose a stable identity yet.")
+        try:
+            identity = self.main_window.auth_client.device_fingerprint(device)
+        except ValueError as error:
+            QMessageBox.warning(self, "Missing source identity", str(error))
             return
         existing = {item.get("identity") for item in case.get("devices", [])}
         if identity not in existing:
-            case.setdefault("devices", []).append({
-                "identity": identity,
-                "name": device.get("name", "Unnamed media"),
-                "path": device.get("path", ""),
-                "filesystem": device.get("filesystem", "Unknown"),
-                "capacity": device.get("capacity", "Unknown"),
-                "attached_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            })
-            self._save_cases()
+            try:
+                updated = self.main_window.auth_client.attach_device(
+                    self.main_window.session, case["id"], device, identity
+                )
+            except (AuthenticationError, ValueError) as error:
+                QMessageBox.critical(self, "Device attachment failed", str(error))
+                return
+            self.cases = [
+                updated if current["id"] == updated["id"] else current
+                for current in self.cases
+            ]
             self._render_cases()
             self._sync_context()
-            self.main_window.set_active_case(case)
+            self.main_window.set_active_case(updated)
             QMessageBox.information(self, "Source attached", f"{device.get('name', 'Media')} was attached to {case['name']}.")
         else:
             QMessageBox.information(self, "Already attached", "This source is already attached to the active case.")
 
     def on_show(self):
-        self._render_cases()
-        self._sync_context()
+        self._refresh_cases()
+        if self.active_case_id is None and self.cases:
+            self.active_case_id = self.cases[0]["id"]
+            self._render_cases()
+            self._sync_context()
+            self.main_window.set_active_case(self.active_case())

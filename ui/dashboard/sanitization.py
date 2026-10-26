@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from auth_client import AuthenticationError
 
 from core.sanitization_engine import (
     CONFIRMATION_PHRASE,
@@ -163,6 +164,8 @@ class SanitizationPage(QWidget):
         self._target: SanitizationTarget | None = None
         self._plan: SanitizationPlanHandle | None = None
         self._worker: _ExecutionWorker | None = None
+        self._audit_case: dict | None = None
+        self._audit_fingerprint: str | None = None
         self._build_ui()
         self._load_capabilities()
         self.refresh_device_context()
@@ -771,6 +774,32 @@ class SanitizationPage(QWidget):
             self.status_line.setText("Authorization cancelled. No target data was changed.")
             return
 
+        try:
+            fingerprint = self.main_window.auth_client.device_fingerprint({
+                "stable_id": self._target.target_id if self._target else "",
+                "path": self._target.path if self._target else "",
+            })
+            audit_case = self.main_window.active_case
+            if audit_case and fingerprint not in {
+                source.get("identity") for source in audit_case.get("devices", [])
+            }:
+                audit_case = None
+            self.main_window.record_audit_event(
+                "SANITIZATION_STARTED",
+                f"Started {plan.method_id} for {plan.target_kind} target '{plan.target_label}'.",
+                case=audit_case,
+                device_fingerprint=fingerprint,
+            )
+        except (AuthenticationError, ValueError) as error:
+            QMessageBox.critical(
+                self,
+                "Sanitization blocked",
+                f"The audit event could not be saved, so the operation was not started:\n{error}",
+            )
+            return
+        self._audit_case = audit_case
+        self._audit_fingerprint = fingerprint
+
         self.execute_button.setEnabled(False)
         self.inspect_button.setEnabled(False)
         self.target_button.setEnabled(False)
@@ -809,14 +838,31 @@ class SanitizationPage(QWidget):
             lines.append(f"Error: {result['error_message']}")
         lines.extend(f"Warning: {item}" for item in result.get("warnings", []))
         self.result_view.setPlainText("\n".join(lines))
+        try:
+            self.main_window.record_audit_event(
+                "SANITIZATION_COMPLETED" if result.get("successful") else "SANITIZATION_FAILED",
+                f"Sanitization execution {result.get('execution_status', 'unknown')}; "
+                f"validation {result.get('validation_status', 'unknown')}.",
+                case=self._audit_case,
+                device_fingerprint=self._audit_fingerprint,
+            )
+        except AuthenticationError as error:
+            lines.append(f"Audit result update failed: {error}")
+            self.result_view.setPlainText("\n".join(lines))
+            self.status_line.setText(
+                "Execution finished, but its result could not be appended to the audit log: "
+                f"{error}"
+            )
         if result.get("successful"):
-            self.status_line.setText(
-                "Backend reports execution and required validation successful. This does not prove physical-media sanitization."
-            )
+            if "Audit result update failed:" not in self.result_view.toPlainText():
+                self.status_line.setText(
+                    "Backend reports execution and required validation successful. This does not prove physical-media sanitization."
+                )
         else:
-            self.status_line.setText(
-                "The backend did not report full success. Review the execution and validation result; do not retry blindly."
-            )
+            if "Audit result update failed:" not in self.result_view.toPlainText():
+                self.status_line.setText(
+                    "The backend did not report full success. Review the execution and validation result; do not retry blindly."
+                )
         self._plan = None
         self.plan_badge.setText("CONSUMED")
         self.plan_badge.setStyleSheet(self._badge_style(False))
@@ -829,6 +875,17 @@ class SanitizationPage(QWidget):
         self.progress.setFormat("Failed")
         self.result_view.setPlainText(f"Execution call failed before a result was returned.\n{message}")
         self.status_line.setText("Execution failed. The plan has been closed; inspect the target again before any retry.")
+        try:
+            self.main_window.record_audit_event(
+                "SANITIZATION_FAILED",
+                f"Sanitization execution failed: {message}",
+                case=self._audit_case,
+                device_fingerprint=self._audit_fingerprint,
+            )
+        except AuthenticationError as error:
+            self.status_line.setText(
+                f"Execution failed and the failure could not be appended to the audit log: {error}"
+            )
         self._plan = None
         self.execute_button.setEnabled(False)
 

@@ -75,6 +75,20 @@ python app.py
 
 Server runs at `http://127.0.0.1:5000`.
 
+For website registration, also set `CRYPTY_SERVICE_KEY` in the API process
+environment and set the same value as `CRYPTY_SERVICE_KEY` in the website's
+`.env.local`. The website sends registration requests through the
+service-authenticated `/api/internal/signup` endpoint; the key is never sent
+to the browser. The API seeds Starter, Professional, and Organization plan
+records on startup. The selected plan is stored on the account.
+
+Case records and device associations are account-scoped at `/api/cases`.
+Device identifiers are stored as SHA-256 fingerprints. Case creation,
+device attachment, case/device selection, recovery, and sanitization events
+are recorded in the hash-chained audit log with account, account plan, case
+and device context when available. Admins and auditors can review all entries
+at `/api/audit/logs`; the website provides the same protected view at `/audit`.
+
 ### Model Setup — why a separate download step?
 
 The YuNet (`face_detection_yunet_2023mar.onnx`, ~230 KB) and SFace

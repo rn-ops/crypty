@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QHeaderView,
 )
+from auth_client import AuthenticationError
 
 """
 __init__                  Initialize page state and build the UI.
@@ -643,6 +644,29 @@ class RecoveryPage(QWidget):
             Path(output_directory) / filename
         )
 
+        device = self._get_selected_device()
+        fingerprint = None
+        audit_case = self.main_window.active_case
+        try:
+            if device:
+                fingerprint = self.main_window.auth_client.device_fingerprint(device)
+            if audit_case and fingerprint:
+                attached = {
+                    source.get("identity")
+                    for source in audit_case.get("devices", [])
+                }
+                if fingerprint not in attached:
+                    audit_case = None
+            self.main_window.record_audit_event(
+                "RECOVERY_STARTED",
+                f"Started recovery for '{filename}'.",
+                case=audit_case,
+                device_fingerprint=fingerprint,
+            )
+        except (AuthenticationError, ValueError) as error:
+            self.event_state.setText(f"Recovery blocked: audit event could not be recorded: {error}")
+            return
+
         self.recover.setEnabled(False)
         self.scan.setEnabled(False)
 
@@ -672,6 +696,8 @@ class RecoveryPage(QWidget):
                     f"\nRecovered bytes: {bytes_recovered:,}"
                     f"\nOutput: {destination}"
                 )
+                result_action = "RECOVERY_COMPLETED"
+                result_details = f"Recovered {bytes_recovered} bytes from '{filename}'."
 
             else:
                 self.ready_state.setText("Partial")
@@ -685,6 +711,20 @@ class RecoveryPage(QWidget):
                     f"\nRecovered bytes: {bytes_recovered:,}"
                     f"\nOutput: {destination}"
                 )
+                result_action = "RECOVERY_PARTIAL"
+                result_details = f"Partially recovered {bytes_recovered} bytes from '{filename}'."
+
+            try:
+                self.main_window.record_audit_event(
+                    result_action,
+                    result_details,
+                    case=audit_case,
+                    device_fingerprint=fingerprint,
+                )
+            except AuthenticationError as error:
+                self.event_state.setText(
+                    f"{self.event_state.text()} Audit result update failed: {error}"
+                )
 
         except Exception as error:
             self.ready_state.setText("Error")
@@ -693,6 +733,17 @@ class RecoveryPage(QWidget):
             )
 
             print("RECOVERY ERROR:", repr(error))
+            try:
+                self.main_window.record_audit_event(
+                    "RECOVERY_FAILED",
+                    f"Recovery failed for '{filename}': {error}",
+                    case=audit_case,
+                    device_fingerprint=fingerprint,
+                )
+            except AuthenticationError as audit_error:
+                self.event_state.setText(
+                    f"{self.event_state.text()} Audit failure update failed: {audit_error}"
+                )
 
         finally:
             self._update_action_state()
