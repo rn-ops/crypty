@@ -203,7 +203,7 @@ class RecoveryPage(QWidget):
         tabs = QTabWidget()
 
         self.hex_view = QTextEdit(
-            "Load a read-only page from the selected media."
+            "Load a page from the selected media."
         )
         self.hex_view.setReadOnly(True)
         self.hex_view.setObjectName("hexView")
@@ -330,7 +330,7 @@ class RecoveryPage(QWidget):
 
         self.device_state.setText(
             f"{device['name']} | {device['capacity']} | "
-            f"{device['filesystem']} | Read-only | SHA: pending"
+            f"{device['filesystem']} | SHA: pending"
         )
 
         self.event_state.setText(
@@ -783,7 +783,7 @@ class RecoveryPage(QWidget):
         if not data:
             self.hex_view.setPlainText(
                 "No bytes read. Raw-volume access may "
-                "require an elevated read-only session."
+                "require an elevated session with the appropriate device permissions."
             )
             return
 

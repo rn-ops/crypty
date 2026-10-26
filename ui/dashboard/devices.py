@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
+    QScrollArea,
+    QSizePolicy,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -22,16 +24,24 @@ class DevicesPage(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 12, 24, 16)
-        layout.setSpacing(10)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(self.scroll)
+        page = QWidget()
+        self.scroll.setWidget(page)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 18, 24, 24)
+        layout.setSpacing(14)
 
         title_row = QHBoxLayout()
         title = QLabel("Evidence sources")
         title.setStyleSheet("font-size: 21px; font-weight: 600;")
         title_row.addWidget(title)
         title_row.addStretch(1)
-        hint = QLabel("Read-only metadata inspection")
+        hint = QLabel("SOURCE INTELLIGENCE")
         hint.setStyleSheet("color: #9aa5a1; font-size: 11px;")
         title_row.addWidget(hint)
         layout.addLayout(title_row)
@@ -78,7 +88,7 @@ class DevicesPage(QWidget):
         detail_row.addWidget(self.device_status)
         right_layout.addLayout(detail_row)
 
-        self.device_name = QLabel("Samsung Portable SSD")
+        self.device_name = QLabel("Select an evidence source")
         self.device_name.setStyleSheet("font-size: 18px; font-weight: 600;")
         right_layout.addWidget(self.device_name)
 
@@ -107,7 +117,7 @@ class DevicesPage(QWidget):
             self.property_labels[key] = value_label
         right_layout.addWidget(properties)
 
-        self.analysis_status = QLabel("Read-only metadata inspection. Storage writes are disabled.")
+        self.analysis_status = QLabel("Connect or select a source to populate metadata and analysis tools.")
         self.analysis_status.setWordWrap(True)
         self.analysis_status.setStyleSheet("color: #a8d9d3; font-size: 11px; padding-top: 2px;")
         right_layout.addWidget(self.analysis_status)
@@ -122,7 +132,49 @@ class DevicesPage(QWidget):
 
         content.addWidget(right, 2)
         layout.addLayout(content)
-        layout.addStretch(1)
+
+        # Feature placeholders are deliberately data-free until their engines are wired in.
+        intelligence_title = QLabel("EVIDENCE INTELLIGENCE")
+        intelligence_title.setStyleSheet("font-size: 12px; font-weight: 700; letter-spacing: 0.14em; color: #ff777e; padding-top: 8px;")
+        layout.addWidget(intelligence_title)
+        intelligence_subtitle = QLabel("Analytical workspaces · populated when evidence is indexed")
+        intelligence_subtitle.setStyleSheet("color: #b4b4bf; font-size: 12px;")
+        layout.addWidget(intelligence_subtitle)
+        feature_grid = QGridLayout()
+        feature_grid.setSpacing(12)
+        features = [
+            ("01", "Cross-Artifact Timeline Reconstruction", "Correlate filesystem events, metadata, and recovered artifacts into a reviewable timeline."),
+            ("02", "Evidence Relationship Graph", "Explore links between files, paths, devices, hashes, and related artifacts."),
+            ("03", "Evidence-Backed Conclusions Engine", "Build traceable findings with references to supporting evidence and confidence notes."),
+            ("04", "Deleted-Data Intelligence", "Surface deleted-data patterns, recoverability signals, and carving results."),
+        ]
+        self.feature_cards = []
+        for index, (number, name, description) in enumerate(features):
+            card = QFrame()
+            card.setObjectName("evidenceFeatureCard")
+            card.setStyleSheet("QFrame#evidenceFeatureCard { background: #1b1b20; border: 1px solid #414149; } QFrame#evidenceFeatureCard:hover { border: 1px solid #e04b54; background: #202025; }")
+            card.setMinimumHeight(132)
+            card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(16, 14, 16, 14)
+            card_layout.setSpacing(8)
+            num = QLabel(number)
+            num.setStyleSheet("color: #ff777e; font-size: 10px; font-weight: 700; letter-spacing: 0.12em;")
+            name_label = QLabel(name)
+            name_label.setWordWrap(True)
+            name_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #f5f5f7;")
+            description_label = QLabel(description)
+            description_label.setWordWrap(True)
+            description_label.setStyleSheet("font-size: 11px; color: #b4b4bf; line-height: 1.4;")
+            state = QLabel("AWAITING EVIDENCE")
+            state.setStyleSheet("color: #92929e; font-size: 9px; font-weight: 700; letter-spacing: 0.1em;")
+            card_layout.addWidget(num)
+            card_layout.addWidget(name_label)
+            card_layout.addWidget(description_label, 1)
+            card_layout.addWidget(state)
+            feature_grid.addWidget(card, index // 2, index % 2)
+            self.feature_cards.append(card)
+        layout.addLayout(feature_grid)
 
         self.populate_devices()
 
@@ -137,6 +189,12 @@ class DevicesPage(QWidget):
         if devices:
             self.device_list.setCurrentRow(0)
             self._update_selected_device(devices[0])
+        else:
+            self.device_name.setText("No evidence source selected")
+            self.device_status.setText("WAITING")
+            for value_label in self.property_labels.values():
+                value_label.setText("—")
+            self.analysis_status.setText("No media detected. Connect a source, then refresh the media explorer.")
 
     def _on_device_selected(self, item):
         self._update_selected_device(item.data(Qt.UserRole))
@@ -146,17 +204,29 @@ class DevicesPage(QWidget):
         self._render_device(device)
 
     def _render_device(self, device):
+        if not device:
+            self.device_name.setText("No evidence source selected")
+            self.device_status.setText("WAITING")
+            for value_label in self.property_labels.values():
+                value_label.setText("—")
+            self.analysis_status.setText("No source selected. Connect media or refresh the explorer.")
+            self.analyze_button.setEnabled(False)
+            return
+        self.analyze_button.setEnabled(True)
         self.device_name.setText(device["name"])
         self.device_status.setText(device["status"])
         for key, value_label in self.property_labels.items():
             value_label.setText(str(device[key]))
-        self.analysis_status.setText("Read-only metadata inspection. Storage writes are disabled.")
+        self.analysis_status.setText("Source selected. Inspect metadata to populate this workspace.")
 
     def refresh_device_context(self):
         self._render_device(self.main_window.device_manager.get_selected_device())
 
     def _analyze_device(self):
         device = self.main_window.device_manager.get_selected_device()
+        if not device:
+            self.analysis_status.setText("Select a detected source before inspecting metadata.")
+            return
         self.analyze_button.setEnabled(False)
         self.analysis_status.setText("Inspecting device metadata...")
 
@@ -168,7 +238,7 @@ class DevicesPage(QWidget):
     def _finish_analysis(self, device):
         result = self.main_window.backend.analyze_device(device)
         self.analysis_status.setText(
-            f"Inspection complete  |  {result['filesystem']}  |  {result['media_type']}  |  Read-only"
+            f"Inspection complete  ·  {result['filesystem']}  ·  {result['media_type']}"
         )
         self.analyze_button.setEnabled(True)
         self.timer.stop()
@@ -180,5 +250,5 @@ class DevicesPage(QWidget):
             f"Media type: {result['media_type']}\n"
             f"Evidence entries: {result['evidence_items']}\n"
             f"Total bytes: {result['total_bytes']:,}\n\n"
-            "Read-only analysis completed.",
+            "Metadata analysis completed.",
         )

@@ -37,12 +37,24 @@ dependencies from the repository root:
 python -m pip install -r requirements.txt
 ```
 
+Build root native dll:
+
+```sh
+py -3 build_native.py
+```
+
 Build the C++ libraries and run the native tests on Windows, Linux, or macOS:
 
 ```sh
 cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
+```
+
+Run the app (equivalent to `py -m main.app`):
+
+```sh
+make run
 ```
 
 The UI uses the authentication service in `auth/api`. Install its dependencies
@@ -672,3 +684,18 @@ ctest --test-dir .\build -C Debug --output-on-failure -R "device_inventory|sanit
 ```
 
 If the build fails, send the complete compiler output before proceeding.
+
+The build succeeds
+
+Your Windows C++ targets compile, including the platform inventory and sanitization components.
+
+
+
+Three focused tests pass
+
+Device inventory, sanitization preflight, and sanitization execution pass their current tests.
+
+
+Physical-device safety is not yet established
+
+These results do not prove every boot-critical, mounted, or host-dependent disk will be identified correctly, nor that real physical-device writes are safe.

@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from data.demo_data import REPORT_SUMMARY
 
 class ReportsPage(QWidget):
     def __init__(self, main_window, audit_only=False):
@@ -32,7 +31,7 @@ class ReportsPage(QWidget):
             return
 
         device = self.main_window.device_manager.get_selected_device()
-        inspection = self.main_window.backend.analyze_device(device)
+        inspection = self.main_window.backend.analyze_device(device) if device else {}
 
         title = QLabel("Investigation Report")
         title.setFixedHeight(24)
@@ -47,12 +46,12 @@ class ReportsPage(QWidget):
         summary_layout.setSpacing(12)
 
         fields = [
-            ("CASE", REPORT_SUMMARY["case_id"]),
-            ("OPERATOR", REPORT_SUMMARY["operator"]),
-            ("DEVICE", device["name"]),
-            ("OPERATION", "Recovery Analysis"),
-            ("START", "Current session"),
-            ("STATUS", "Inspected"),
+            ("CASE", "No case assigned"),
+            ("OPERATOR", getattr(self.main_window.session, "username", "Current session")),
+            ("DEVICE", device.get("name", "No source selected") if device else "No source selected"),
+            ("OPERATION", "Not started"),
+            ("START", "—"),
+            ("STATUS", "Awaiting analysis"),
         ]
 
         for label, value in fields:
@@ -72,10 +71,10 @@ class ReportsPage(QWidget):
         stats_layout.setContentsMargins(18, 16, 18, 16)
         stats_layout.setSpacing(12)
         stats_layout.addWidget(QLabel(
-            f"INDEXED EVIDENCE\n{inspection['evidence_items']} entries identified\n"
-            f"{inspection['total_bytes']:,} bytes indexed"
+            f"INDEXED EVIDENCE\n{inspection.get('evidence_items', 'Pending')} entries identified\n"
+            f"{inspection.get('total_bytes', 'Pending')} bytes indexed"
         ))
-        stats_layout.addWidget(QLabel("INTEGRITY\nRead-only inspection"))
+        stats_layout.addWidget(QLabel("INTEGRITY\nPending verification"))
         stats_layout.addWidget(QLabel(f"AUDIT\n{len(self.main_window.backend.audit_events())} events recorded"))
         report_columns = QHBoxLayout()
         report_columns.setSpacing(16)
@@ -125,18 +124,18 @@ class ReportsPage(QWidget):
 
     def _preview_report(self):
         device = self.main_window.device_manager.get_selected_device()
-        inspection = self.main_window.backend.analyze_device(device)
+        inspection = self.main_window.backend.analyze_device(device) if device else {}
         self._preview = QTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setPlainText(
             "Crypty Investigation Report\n"
-            "Case: CRYPTY-001\n"
-            "Operator: Investigator session\n"
-            f"Device: {device['name']}\n"
-            "Operation: Read-only inspection\n"
-            f"Filesystem: {inspection['filesystem']}\n"
-            f"Entries identified: {inspection['evidence_items']}\n"
-            f"Bytes indexed: {inspection['total_bytes']:,}\n\n"
+            "Case: Not assigned\n"
+            f"Operator: {getattr(self.main_window.session, 'username', 'Current session')}\n"
+            f"Device: {device.get('name', 'No source selected') if device else 'No source selected'}\n"
+            "Operation: Metadata inspection\n"
+            f"Filesystem: {inspection.get('filesystem', 'Pending')}\n"
+            f"Entries identified: {inspection.get('evidence_items', 'Pending')}\n"
+            f"Bytes indexed: {inspection.get('total_bytes', 'Pending')}\n\n"
             "Report generated from the native workflow engine."
         )
         self._preview.show()

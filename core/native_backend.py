@@ -157,10 +157,38 @@ class NativeBackend:
         library.crypty_device_capacity.argtypes = [ctypes.c_size_t]
         library.crypty_device_capacity.restype = ctypes.c_uint64
 
+        # Physical-device inventory. This is separate from mounted-volume
+        # enumeration because destructive operations require a whole-device target.
+        library.crypty_physical_devices_refresh.restype = None
+        library.crypty_physical_device_count.restype = ctypes.c_size_t
+        for name in (
+            "crypty_physical_device_path", "crypty_physical_device_stable_id",
+            "crypty_physical_device_model", "crypty_physical_device_block_reason",
+        ):
+            getattr(library, name).argtypes = [ctypes.c_size_t]
+            getattr(library, name).restype = ctypes.c_char_p
+        library.crypty_physical_device_capacity.argtypes = [ctypes.c_size_t]
+        library.crypty_physical_device_capacity.restype = ctypes.c_uint64
+        library.crypty_physical_device_logical_sector_size.argtypes = [ctypes.c_size_t]
+        library.crypty_physical_device_logical_sector_size.restype = ctypes.c_uint32
+        library.crypty_physical_device_protection_status.argtypes = [ctypes.c_size_t]
+        library.crypty_physical_device_protection_status.restype = ctypes.c_int
+        library.crypty_physical_device_protection_discovery_complete.argtypes = [ctypes.c_size_t]
+        library.crypty_physical_device_protection_discovery_complete.restype = ctypes.c_int
+
         # Native sanitization plan/execution API. The opaque handle owns the
         # immutable target plan and its eventual execution result.
         library.crypty_sanitization_plan_image_file.argtypes = [ctypes.c_char_p]
         library.crypty_sanitization_plan_image_file.restype = ctypes.c_void_p
+        library.crypty_sanitization_plan_physical_device.argtypes = [
+            ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint64,
+        ]
+        library.crypty_sanitization_plan_physical_device.restype = ctypes.c_void_p
+        library.crypty_sanitization_execute_physical_device.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_uint64, ctypes.c_char_p,
+        ]
+        library.crypty_sanitization_execute_physical_device.restype = ctypes.c_int
         library.crypty_sanitization_plan_destroy.argtypes = [ctypes.c_void_p]
         library.crypty_sanitization_plan_status.argtypes = [ctypes.c_void_p]
         library.crypty_sanitization_plan_status.restype = ctypes.c_int
@@ -282,6 +310,168 @@ class NativeBackend:
                 break
             amount /= 1024
         return f"{amount:.0f} {unit}"
+
+    def detect_physical_devices(self) -> list[dict]:
+        """Return whole-device inventory, distinct from mounted volumes."""
+        self._library.crypty_physical_devices_refresh()
+        result = []
+        for index in range(self._library.crypty_physical_device_count()):
+            decode = lambda name: getattr(self._library, name)(index).decode(
+                "utf-8", errors="replace"
+            )
+            result.append({
+                "path": decode("crypty_physical_device_path"),
+                "stable_id": decode("crypty_physical_device_stable_id"),
+                "model": decode("crypty_physical_device_model"),
+                "capacity_bytes": int(self._library.crypty_physical_device_capacity(index)),
+                "logical_sector_size": int(self._library.crypty_physical_device_logical_sector_size(index)),
+                "protection_status": int(self._library.crypty_physical_device_protection_status(index)),
+                "protection_discovery_complete": bool(self._library.crypty_physical_device_protection_discovery_complete(index)),
+                "block_reason": decode("crypty_physical_device_block_reason"),
+            })
+        return result
+
+    def create_physical_sanitization_plan(self, device: dict) -> dict:
+        """Create a Clear-level whole-device plan from a fresh identity match."""
+        handle = self._library.crypty_sanitization_plan_physical_device(
+            str(device.get("path", "")).encode("utf-8"),
+            str(device.get("stable_id", "")).encode("utf-8"),
+            int(device.get("capacity_bytes", 0)),
+        )
+        if not handle:
+            raise RuntimeError("The native physical-device planner could not create a plan")
+        status = int(self._library.crypty_sanitization_plan_status(handle))
+        decode = lambda name: getattr(self._library, name)(handle).decode(
+            "utf-8", errors="replace"
+        )
+        return {
+            "_handle": int(handle),
+            "target_kind": "PhysicalDevice",
+            "status": status,
+            "status_name": {0: "Ready", 1: "Unsupported", 2: "RequiresUserConfirmation", 3: "Blocked"}.get(status, "Unknown"),
+            "reason": decode("crypty_sanitization_plan_reason"),
+            "target_path": decode("crypty_sanitization_plan_path"),
+            "capacity_bytes": int(self._library.crypty_sanitization_plan_capacity(handle)),
+        }
+
+    def execute_physical_sanitization_plan(
+        self, plan_handle: int, confirmed: bool, confirmed_path: str,
+        capacity_bytes: int, confirmation_phrase: str,
+    ) -> dict:
+        # Explicit UI authorization is forwarded; native code independently
+        # validates phrase, plan identity, and device eligibility before writing.
+        handle = ctypes.c_void_p(plan_handle)
+        successful = bool(self._library.crypty_sanitization_execute_physical_device(
+            handle, int(bool(confirmed)), confirmed_path.encode("utf-8"),
+            capacity_bytes, confirmation_phrase.encode("utf-8"),
+        ))
+        decode = lambda name: getattr(self._library, name)(handle).decode(
+            "utf-8", errors="replace"
+        )
+        return {
+            "executed": bool(self._library.crypty_sanitization_result_executed(handle)),
+            "successful": successful and bool(self._library.crypty_sanitization_result_successful(handle)),
+            "execution_status": int(self._library.crypty_sanitization_result_execution_status(handle)),
+            "validation_status": int(self._library.crypty_sanitization_result_validation_status(handle)),
+            "bytes_processed": int(self._library.crypty_sanitization_result_bytes_processed(handle)),
+            "error_code": decode("crypty_sanitization_result_error_code"),
+            "error_message": decode("crypty_sanitization_result_error_message"),
+        }
+
+    def sanitization_capabilities(self) -> dict:
+        """Advertise physical-device workflow support separately from eligibility.
+
+        A target can appear in the list and still receive a Blocked plan. The native
+        planner is the authority for whether a particular physical device is eligible.
+        """
+        return {
+            "targets": [
+                {
+                    "kind": "disk_image_file",
+                    "label": "Disposable image file",
+                    "selector": "file",
+                    "enabled": True,
+                    "description": "Overwrite a Crypty-marked disposable image file and verify it by read-back.",
+                },
+                {
+                    "kind": "physical_device",
+                    "label": "Physical USB / storage device",
+                    "selector": "device",
+                    "enabled": True,
+                    "description": "Select a whole physical device. Crypty refreshes identity and runs native eligibility checks before a plan can be authorized.",
+                },
+            ],
+            "methods": [
+                {
+                    "id": "image_file_zero_overwrite",
+                    "label": "Zero overwrite + read-back verification",
+                    "enabled": True,
+                    "assurance": "Clear",
+                    "description": "Available for eligible disposable image files.",
+                },
+                {
+                    "id": "physical_device_zero_overwrite",
+                    "label": "Physical-device zero overwrite + read-back verification",
+                    "enabled": True,
+                    "assurance": "Clear",
+                    "description": "Whole-device overwrite. Actual eligibility is determined by the native planner; this does not prove flash-cell purge.",
+                },
+            ],
+            "execution_enabled": True,
+            "limitations": [
+                "Physical-device execution remains blocked unless native host-storage protection discovery is complete.",
+                "Zero overwrite and read-back do not prove erasure of remapped flash cells or controller-reserved areas.",
+                "Use only a disposable device whose contents may be permanently destroyed.",
+            ],
+        }
+
+    def list_sanitization_targets(self, target_kind: str) -> list[dict]:
+        if target_kind != "physical_device":
+            return []
+        devices = self.detect_physical_devices()
+        targets = []
+        for device in devices:
+            path = str(device.get("path", ""))
+            stable_id = str(device.get("stable_id", ""))
+            capacity = int(device.get("capacity_bytes", 0) or 0)
+            model = str(device.get("model", "Unknown device")) or "Unknown device"
+            reason = str(device.get("block_reason", ""))
+            protection_complete = bool(device.get("protection_discovery_complete", False))
+            label = f"{model} [{path}]"
+            if reason:
+                label += f" — {reason}"
+            elif not protection_complete:
+                label += " — protection checks incomplete"
+            targets.append({
+                "kind": "physical_device",
+                "target_id": stable_id,
+                "label": label,
+                "selector": "device",
+                "path": path,
+                "capacity_bytes": capacity,
+                "metadata": dict(device),
+            })
+        return targets
+
+    def create_sanitization_plan_for_target(self, target: dict, method_id: str | None = None) -> dict:
+        if str(target.get("kind", "")) != "physical_device":
+            raise RuntimeError(f"Unsupported native target kind: {target.get('kind')}")
+        metadata = target.get("metadata") if isinstance(target.get("metadata"), dict) else {}
+        device = {
+            "path": str(target.get("path", metadata.get("path", ""))),
+            "stable_id": str(target.get("target_id", metadata.get("stable_id", ""))),
+            "capacity_bytes": int(target.get("capacity_bytes", metadata.get("capacity_bytes", 0)) or 0),
+        }
+        return self.create_physical_sanitization_plan(device)
+
+    def execute_sanitization_plan_for_target(self, plan_handle: int, authorization: dict) -> dict:
+        return self.execute_physical_sanitization_plan(
+            plan_handle,
+            bool(authorization.get("confirmed", False)),
+            str(authorization.get("confirmed_target_path", "")),
+            int(authorization.get("confirmed_target_capacity_bytes", 0) or 0),
+            str(authorization.get("confirmation_phrase", "")),
+        )
 
     def create_sanitization_plan(self, path: str) -> dict:
         handle = self._library.crypty_sanitization_plan_image_file(

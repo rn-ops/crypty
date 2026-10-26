@@ -1,5 +1,6 @@
 #include <crypty/workflow.hpp>
 #include <crypty/platform/device_access.hpp>
+#include <crypty/platform/device_inventory.hpp>
 #include "../reporting/report.hpp"
 #include "../recovery/recovery_engine.hpp"
 #include "../sanitization/sanitization_engine.hpp"
@@ -7,6 +8,7 @@
 #include <crypty/sanitization/execution_authorization.hpp>
 
 #include <cstddef>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -70,6 +72,31 @@ std::size_t read_media(const std::string& path, std::uint64_t offset,
 using crypty::sanitization::FileIdentity;
 using crypty::sanitization::SanitizationPlan;
 using crypty::sanitization::SanitizationResult;
+using crypty::platform::PhysicalDeviceInfo;
+
+std::vector<PhysicalDeviceInfo> enumerate_physical_devices_snapshot() {
+    return crypty::platform::enumerate_physical_devices().devices;
+}
+
+std::vector<PhysicalDeviceInfo>& physical_devices() {
+    static std::vector<PhysicalDeviceInfo> value = enumerate_physical_devices_snapshot();
+    return value;
+}
+
+crypty::sanitization::MediaType media_type_for(const PhysicalDeviceInfo& device) {
+    std::string text = device.bus_type + " " + device.model + " " + device.vendor;
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (text.find("nvme") != std::string::npos) return crypty::sanitization::MediaType::NVME_SSD;
+    if (text.find("ssd") != std::string::npos || text.find("sata") != std::string::npos)
+        return crypty::sanitization::MediaType::SATA_SSD;
+    if (device.removable || device.hotplug || text.find("usb") != std::string::npos)
+        return crypty::sanitization::MediaType::USB_FLASH;
+    if (text.find("ata") != std::string::npos || text.find("scsi") != std::string::npos)
+        return crypty::sanitization::MediaType::HDD;
+    return crypty::sanitization::MediaType::Unknown;
+}
 
 constexpr char kDisposableImageMarker[] = "CRYPTY_DISPOSABLE_IMAGE_V1\n";
 
@@ -256,6 +283,159 @@ CRYPTY_API void* crypty_sanitization_plan_image_file(const char* raw_path) {
     plan = policy_engine.create_plan(policy, target);
     plan.plan_id = plan_id;
     return operation;
+}
+
+// Physical-device inventory API. Paths and stable IDs are refreshed from the
+// platform inventory; UI-provided values are never trusted as authoritative.
+CRYPTY_API void crypty_physical_devices_refresh() {
+    physical_devices() = enumerate_physical_devices_snapshot();
+}
+
+CRYPTY_API std::size_t crypty_physical_device_count() {
+    return physical_devices().size();
+}
+
+CRYPTY_API const char* crypty_physical_device_path(std::size_t index) {
+    return index >= physical_devices().size() ? empty_string().c_str()
+        : copy_string(physical_devices()[index].device_path);
+}
+
+CRYPTY_API const char* crypty_physical_device_stable_id(std::size_t index) {
+    return index >= physical_devices().size() ? empty_string().c_str()
+        : copy_string(physical_devices()[index].stable_id);
+}
+
+CRYPTY_API const char* crypty_physical_device_model(std::size_t index) {
+    return index >= physical_devices().size() ? empty_string().c_str()
+        : copy_string(physical_devices()[index].model);
+}
+
+CRYPTY_API std::uint64_t crypty_physical_device_capacity(std::size_t index) {
+    return index >= physical_devices().size() ? 0 : physical_devices()[index].capacity_bytes;
+}
+
+CRYPTY_API std::uint32_t crypty_physical_device_logical_sector_size(std::size_t index) {
+    return index >= physical_devices().size() ? 0 : physical_devices()[index].logical_sector_size;
+}
+
+CRYPTY_API int crypty_physical_device_protection_status(std::size_t index) {
+    if (index >= physical_devices().size()) return static_cast<int>(crypty::platform::DeviceProtectionStatus::Unknown);
+    return static_cast<int>(physical_devices()[index].protection_status);
+}
+
+CRYPTY_API int crypty_physical_device_protection_discovery_complete(std::size_t index) {
+    return index < physical_devices().size() && physical_devices()[index].protection_discovery_complete ? 1 : 0;
+}
+
+CRYPTY_API const char* crypty_physical_device_block_reason(std::size_t index) {
+    if (index >= physical_devices().size()) return copy_string("Invalid physical-device index.");
+    const auto& device = physical_devices()[index];
+    if (device.protection_status == crypty::platform::DeviceProtectionStatus::Protected)
+        return copy_string(device.protection_reasons.empty() ? "Device is classified as protected host storage." : device.protection_reasons.front());
+    if (!device.protection_discovery_complete)
+        return copy_string("Host-storage protection discovery is incomplete; physical sanitization is blocked.");
+    if (device.protection_status != crypty::platform::DeviceProtectionStatus::Eligible)
+        return copy_string("Device eligibility has not been established.");
+    if (device.stable_id.empty()) return copy_string("A stable hardware/device identifier is unavailable.");
+    if (device.read_only_status_known && device.read_only) return copy_string("Device is reported read-only.");
+    if (!device.read_only_status_known) return copy_string("Read-only status could not be established.");
+    if (!device.metadata_complete) return copy_string("Physical-device metadata is incomplete.");
+    return copy_string("");
+}
+
+CRYPTY_API void* crypty_sanitization_plan_physical_device(
+    const char* raw_path, const char* raw_stable_id, std::uint64_t expected_capacity) {
+    auto* operation = new SanitizationOperation{};
+    auto& plan = operation->plan;
+    plan.plan_id = "USB-CLEAR-" + std::to_string(next_sanitization_plan_id.fetch_add(1));
+    plan.policy_id = "CRYPTY-PHYSICAL-CLEAR";
+    plan.target_kind = crypty::sanitization::TargetKind::PhysicalDevice;
+    plan.required_level = crypty::sanitization::AssuranceLevel::Clear;
+    plan.requires_post_sanitization_validation = true;
+    plan.requires_audit_evidence = true;
+
+    if (!raw_path || !*raw_path || !raw_stable_id || !*raw_stable_id || expected_capacity == 0) {
+        plan.status = crypty::sanitization::PlanStatus::Blocked;
+        plan.status_reason = "A physical-device path, stable identifier, and expected capacity are required.";
+        return operation;
+    }
+
+    // Refresh immediately before plan creation, then require all caller-provided
+    // identity fields to match current native inventory.
+    physical_devices() = enumerate_physical_devices_snapshot();
+    const auto found = std::find_if(physical_devices().begin(), physical_devices().end(),
+        [&](const PhysicalDeviceInfo& d) {
+            return d.device_path == raw_path && d.stable_id == raw_stable_id &&
+                   d.capacity_bytes == expected_capacity;
+        });
+    if (found == physical_devices().end()) {
+        plan.status = crypty::sanitization::PlanStatus::Blocked;
+        plan.status_reason = "The selected physical device no longer matches current inventory. Refresh devices and select it again.";
+        return operation;
+    }
+
+    plan.device_id = found->stable_id;
+    plan.target_path = found->device_path;
+    plan.target_capacity_bytes = found->capacity_bytes;
+    plan.media_type = media_type_for(*found);
+
+    if (found->protection_status != crypty::platform::DeviceProtectionStatus::Eligible ||
+        !found->protection_discovery_complete || found->stable_id.empty() ||
+        !found->read_only_status_known || found->read_only || !found->metadata_complete ||
+        found->contains_os_volume || !found->os_volume_membership_known) {
+        plan.status = crypty::sanitization::PlanStatus::Blocked;
+        plan.status_reason = "Physical-device execution is blocked because eligibility, host-storage protection, read-only status, or metadata checks are incomplete or failed.";
+        if (!found->protection_reasons.empty()) plan.status_reason += " " + found->protection_reasons.front();
+        return operation;
+    }
+    if (plan.media_type == crypty::sanitization::MediaType::Unknown) {
+        plan.status = crypty::sanitization::PlanStatus::Unsupported;
+        plan.status_reason = "The device media type could not be determined; no overwrite plan was created.";
+        return operation;
+    }
+
+    crypty::sanitization::SanitizationPolicy policy;
+    policy.policy_id = plan.policy_id;
+    policy.policy_version = "1.0";
+    policy.required_level = crypty::sanitization::AssuranceLevel::Clear;
+    policy.require_validation = true;
+    policy.require_audit_evidence = true;
+    policy.allow_fallback = false;
+    policy.permitted_methods = { crypty::sanitization::Method::Overwrite };
+
+    crypty::sanitization::SanitizationTarget target;
+    target.device_id = plan.device_id;
+    target.media_type = plan.media_type;
+    target.capacity_bytes = found->capacity_bytes;
+    target.kind = crypty::sanitization::TargetKind::PhysicalDevice;
+    target.target_path = found->device_path;
+    target.available_methods = { crypty::sanitization::Method::Overwrite };
+
+    crypty::sanitization::PolicyEngine policy_engine;
+    plan = policy_engine.create_plan(policy, target);
+    plan.plan_id = "USB-CLEAR-" + std::to_string(next_sanitization_plan_id.fetch_add(1));
+    plan.target_path = found->device_path;
+    return operation;
+}
+
+CRYPTY_API int crypty_sanitization_execute_physical_device(
+    void* handle, int confirmed, const char* confirmed_path,
+    std::uint64_t confirmed_capacity, const char* confirmation_phrase) {
+    if (!handle) return 0;
+    auto* operation = sanitization_operation(handle);
+    if (operation->executed || operation->plan.status != crypty::sanitization::PlanStatus::Ready ||
+        operation->plan.target_kind != crypty::sanitization::TargetKind::PhysicalDevice) return 0;
+
+    crypty::sanitization::ExecutionAuthorization authorization;
+    authorization.confirmed = confirmed != 0;
+    authorization.confirmed_target_path = confirmed_path ? confirmed_path : "";
+    authorization.confirmed_target_capacity_bytes = confirmed_capacity;
+    authorization.confirmation_phrase = confirmation_phrase ? confirmation_phrase : "";
+
+    crypty::sanitization::SanitizationEngine engine;
+    operation->result = engine.execute(operation->plan, authorization);
+    operation->executed = true;
+    return operation->result.successful ? 1 : 0;
 }
 
 CRYPTY_API void crypty_sanitization_plan_destroy(void* handle) {

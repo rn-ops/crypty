@@ -14,83 +14,67 @@ from PySide6.QtWidgets import (
 
 class WorkspaceHeader(QFrame):
     page_selected = Signal(str)
+    media_explorer_requested = Signal()
 
     def __init__(self):
         super().__init__()
-
-        self.setFixedHeight(58)
         self.setObjectName("pageHeader")
-        self.setStyleSheet(
-            "QFrame#pageHeader { background: #11191d; "
-            "border-bottom: 1px solid #2a383e; }"
-        )
+        self.setStyleSheet("QFrame#pageHeader { background: #151517; border-bottom: 1px solid #3a3a40; }")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 10, 18, 8)
+        layout.setSpacing(8)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(18, 5, 18, 5)
-        layout.setSpacing(14)
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        brand = QLabel("C  CRYPTY")
+        brand.setStyleSheet("color: #f3f1ee; font-size: 20px; font-weight: 900; letter-spacing: .02em; padding-right: 8px;")
+        top.addWidget(brand)
+        caption = QLabel("AVANT  /  FORENSICS WORKBENCH")
+        caption.setStyleSheet("color: #a7a5ac; font-size: 10px; letter-spacing: .12em;")
+        top.addWidget(caption)
+        top.addStretch(1)
 
-        # Brand
-        brand_layout = QVBoxLayout()
-        brand_layout.setSpacing(0)
-        brand_layout.setContentsMargins(0, 0, 0, 0)
+        self.case_label = QLabel("NO ACTIVE CASE")
+        self.case_label.setStyleSheet("background: #202024; color: #d4d1d6; border: 1px solid #414149; padding: 6px 9px; font-size: 10px; font-weight: 700;")
+        top.addWidget(self.case_label)
 
-        brand = QLabel("◇  CRYPTY")
-        brand.setStyleSheet(
-            "color: #e8f4f1; font-size: 17px; font-weight: 700; "
-            "letter-spacing: .14em;"
-        )
-        brand_layout.addWidget(brand)
+        self.media_button = QPushButton("▤  Media Explorer")
+        self.media_button.setCursor(Qt.PointingHandCursor)
+        self.media_button.clicked.connect(self.media_explorer_requested.emit)
+        top.addWidget(self.media_button)
+        layout.addLayout(top)
 
-        caption = QLabel("Digital forensics and sanitization workstation")
-        caption.setStyleSheet(
-            "color: #91a5a6; font-size: 9px; letter-spacing: .08em;"
-        )
-        brand_layout.addWidget(caption)
-
-        layout.addLayout(brand_layout)
-
-        # Navigation
+        nav = QHBoxLayout()
+        nav.setSpacing(4)
+        self.nav_buttons = {}
         labels = [
             ("overview", "Overview"),
-            ("devices", "Evidence"),
+            ("cases", "Cases"),
+            ("devices", "Devices"),
             ("recovery", "Recovery"),
             ("sanitization", "Sanitization"),
-            ("reports", "Reports"),
-            ("audit", "Audit"),
+            ("evidence", "Evidence"),
+            ("reports", "Reports & Audit"),
+            ("settings", "Settings"),
         ]
-
-        self.nav_buttons = {}
-
         for key, label in labels:
             button = QPushButton(label)
             button.setObjectName("headerNav")
             button.setCursor(Qt.PointingHandCursor)
-            button.clicked.connect(
-                lambda checked=False, page=key:
-                    self.page_selected.emit(page)
-            )
-
-            layout.addWidget(button)
+            button.setCheckable(False)
+            button.clicked.connect(lambda checked=False, page=key: self.page_selected.emit(page))
+            nav.addWidget(button)
             self.nav_buttons[key] = button
+        nav.addStretch(1)
+        layout.addLayout(nav)
 
-        layout.addStretch(1)
-
-        # Case information
-        case = QLabel("Case  CRYPTY-001")
-        case.setStyleSheet(
-            "background: #172228; border: 1px solid #314148; "
-            "padding: 7px 10px; font-size: 11px;"
-        )
-        layout.addWidget(case)
-
-        readonly = QLabel("Read-Only Mode")
-        readonly.setStyleSheet(
-            "color: #77ded5; background: #123034; "
-            "border: 1px solid #245b5d; padding: 7px 10px; "
-            "font-size: 11px;"
-        )
-        readonly.setAlignment(Qt.AlignCenter)
-        layout.addWidget(readonly)
+    def set_active_case(self, case_name=None):
+        if case_name:
+            self.case_label.setText("CASE  ·  " + case_name.upper())
+            self.case_label.setToolTip(case_name)
+        else:
+            self.case_label.setText("NO ACTIVE CASE")
+            self.case_label.setToolTip("Create or select a case to establish investigation context")
 
 
 class MediaSidebar(QSplitter):
@@ -206,12 +190,15 @@ class MediaSidebar(QSplitter):
         details_layout.setContentsMargins(12, 12, 12, 12)
         details_layout.setSpacing(7)
 
-        case_title = QLabel("CASE PROPERTIES")
-        case_title.setObjectName("panelEyebrow")
-        details_layout.addWidget(case_title)
-        details_layout.addWidget(QLabel("Case: CRYPTY-001"))
-        details_layout.addWidget(QLabel("Status: Open"))
-        details_layout.addWidget(QLabel("Evidence: Read-only"))
+        self.case_context_title = QLabel("ACTIVE CASE")
+        self.case_context_title.setObjectName("panelEyebrow")
+        details_layout.addWidget(self.case_context_title)
+        self.case_context_label = QLabel("No case selected")
+        self.case_context_label.setWordWrap(True)
+        details_layout.addWidget(self.case_context_label)
+        self.device_context_label = QLabel("No media selected")
+        self.device_context_label.setWordWrap(True)
+        details_layout.addWidget(self.device_context_label)
         details_layout.addSpacing(6)
 
         account_title = QLabel("ACCOUNT")
@@ -234,6 +221,10 @@ class MediaSidebar(QSplitter):
     def set_active_device(self, device):
         self.active_device = device
         self.refresh()
+        self.device_context_label.setText(device.get("name", "Selected media") if device else "No media selected")
+
+    def set_case_context(self, case_name=None):
+        self.case_context_label.setText(case_name or "No case selected")
 
     def refresh(self):
         self.device_manager.refresh()
@@ -303,7 +294,7 @@ class WorkspaceFooter(QFrame):
 
         self.ready_label = QLabel("Ready")
         self.device_label = QLabel("No media selected")
-        self.hash_label = QLabel("SHA-256: pending")
+        self.hash_label = QLabel("Integrity: not calculated")
         self.event_label = QLabel("No active operations")
 
         for widget in (
@@ -328,7 +319,7 @@ class WorkspaceFooter(QFrame):
         if device:
             self.device_label.setText(
                 f"{device['name']} | {device['capacity']} | "
-                f"{device['filesystem']} | Read-only"
+                f"{device.get('filesystem', 'Filesystem pending')}"
             )
 
         if event:

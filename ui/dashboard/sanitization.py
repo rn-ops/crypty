@@ -238,6 +238,37 @@ class SanitizationPage(QWidget):
         self.target_button.clicked.connect(self._choose_target)
         left_layout.addWidget(self.target_button)
 
+        self.refresh_physical_button = QPushButton("Refresh physical devices")
+        self.refresh_physical_button.setProperty("class", "secondary")
+        self.refresh_physical_button.clicked.connect(self._refresh_physical_devices)
+        self.refresh_physical_button.setVisible(False)
+        left_layout.addWidget(self.refresh_physical_button)
+
+        self.physical_device_combo = QComboBox()
+        self.physical_device_combo.setVisible(False)
+        self.physical_device_combo.currentIndexChanged.connect(self._on_physical_device_selected)
+        left_layout.addWidget(self.physical_device_combo)
+
+        self.physical_device_status = QLabel("Physical-device inventory has not been refreshed.")
+        self.physical_device_status.setWordWrap(True)
+        self.physical_device_status.setObjectName("muted")
+        self.physical_device_status.setVisible(False)
+        left_layout.addWidget(self.physical_device_status)
+
+        self.selected_device_button = QPushButton("Use selected Evidence device")
+        self.selected_device_button.setProperty("class", "secondary")
+        self.selected_device_button.setToolTip(
+            "Load the globally selected sidebar/Evidence volume for review. "
+            "This does not select or authorize its underlying physical disk for erasure."
+        )
+        self.selected_device_button.clicked.connect(self._use_selected_evidence_device)
+        left_layout.addWidget(self.selected_device_button)
+
+        self.selected_device_context = QLabel("Evidence selection: none")
+        self.selected_device_context.setWordWrap(True)
+        self.selected_device_context.setObjectName("muted")
+        left_layout.addWidget(self.selected_device_context)
+
         self.target_path = QLabel("No target selected")
         self.target_path.setWordWrap(True)
         self.target_path.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -392,8 +423,8 @@ class SanitizationPage(QWidget):
         limitations = self._capabilities.get("limitations", [])
         self.guardrail_text.setPlainText("\n".join(f"• {item}" for item in limitations) or "No additional limitations reported.")
         self.safety_banner.setText(
-            "Destructive operations require a Ready plan and target-specific authorization. "
-            "Physical-device sanitization remains disabled unless the backend explicitly advertises and implements it."
+            "Destructive operations require a Ready native plan and target-specific authorization. "
+            "Physical-device plans are refreshed against whole-device identity and remain blocked when protection checks are incomplete."
         )
         self._on_target_kind_changed()
         self._on_method_changed()
@@ -410,10 +441,29 @@ class SanitizationPage(QWidget):
             self.target_button.setText("Choose image file…")
             self.target_button.setEnabled(bool(descriptor.get("enabled")) and not self._busy())
         elif selector == "device":
-            self.target_button.setText("Choose device…")
+            self.target_button.setText("Choose physical device…")
             self.target_button.setEnabled(bool(descriptor.get("enabled")) and not self._busy())
         else:
             self.target_button.setEnabled(False)
+        if hasattr(self, "refresh_physical_button"):
+            self.refresh_physical_button.setVisible(selector == "device")
+            self.refresh_physical_button.setEnabled(selector == "device" and not self._busy())
+        if hasattr(self, "physical_device_combo"):
+            self.physical_device_combo.setVisible(selector == "device")
+            self.physical_device_status.setVisible(selector == "device")
+        # Keep the method selector aligned with the selected target type. A physical
+        # device must never accidentally retain the image-file-only method.
+        desired_method = (
+            "physical_device_zero_overwrite" if descriptor.get("kind") == "physical_device"
+            else "image_file_zero_overwrite"
+        )
+        for method_index in range(self.method_combo.count()):
+            method = self.method_combo.itemData(method_index)
+            if isinstance(method, dict) and method.get("id") == desired_method:
+                self.method_combo.blockSignals(True)
+                self.method_combo.setCurrentIndex(method_index)
+                self.method_combo.blockSignals(False)
+                break
         self._target = None
         self.target_path.setText("No target selected")
         self.target_meta.setText("Target size: —")
@@ -422,6 +472,109 @@ class SanitizationPage(QWidget):
 
     def _on_method_changed(self, *_):
         self._discard_plan()
+        self._update_actions()
+
+    def _refresh_physical_devices(self):
+        """Refresh and render whole-device inventory with per-device protection state."""
+        if self._busy():
+            return
+        try:
+            targets = self.engine.list_targets("physical_device")
+        except Exception as error:
+            self.physical_device_combo.clear()
+            self.physical_device_status.setText(f"Physical-device refresh failed: {error}")
+            self.status_line.setText(f"Physical-device refresh failed: {error}")
+            QMessageBox.warning(self, "Device refresh failed", str(error))
+            return
+
+        self._discard_plan()
+        self._target = None
+        self.target_path.setText("No target selected")
+        self.target_meta.setText("Target size: —")
+        # Keep native Python objects outside Qt item data. PySide/Qt item-data
+        # conversion should not determine whether a physical target is usable.
+        self._physical_targets = list(targets)
+
+        self.physical_device_combo.blockSignals(True)
+        self.physical_device_combo.clear()
+
+        for target in self._physical_targets:
+            meta = target.metadata if isinstance(target.metadata, dict) else {}
+            model = str(meta.get("model") or target.label)
+            path = str(meta.get("path") or target.path)
+            capacity = self._format_capacity(target.capacity_bytes)
+            complete = bool(meta.get("protection_discovery_complete", False))
+            reason = str(meta.get("block_reason") or "")
+            state = (
+                "protection checks complete"
+                if complete
+                else "PROTECTION CHECKS INCOMPLETE"
+            )
+            label = f"{model} · {capacity} · {path} · {state}"
+            if reason:
+                label += f" · {reason}"
+
+            # Store only text in Qt; retain the target in _physical_targets.
+            self.physical_device_combo.addItem(label)
+
+        self.physical_device_combo.blockSignals(False)
+
+        if targets:
+            self.physical_device_status.setText(
+                f"{len(targets)} physical device(s) found. Select the exact whole disk. "
+                "Incomplete protection discovery means the native plan must remain blocked."
+            )
+            self.physical_device_combo.setCurrentIndex(0)
+            self._on_physical_device_selected(0)
+        else:
+            self.physical_device_status.setText(
+                "No physical devices returned by the native inventory. Run Crypty elevated "
+                "if raw-device access is required; no device has been opened for writing."
+            )
+            self.status_line.setText("Physical-device inventory is empty. No operation performed.")
+        self.result_view.setPlainText("No operation performed.")
+        self._update_actions()
+
+    def _on_physical_device_selected(self, index: int):
+        if self._busy() or index < 0:
+            return
+
+        targets = getattr(self, "_physical_targets", [])
+        if index >= len(targets):
+            self.physical_device_status.setText(
+                "The selected entry has no matching native target. Refresh inventory."
+            )
+            return
+
+        target = targets[index]
+        if not isinstance(target, SanitizationTarget):
+            self.physical_device_status.setText(
+                f"Unexpected native target type: {type(target).__name__}"
+            )
+            return
+
+        self._discard_plan()
+        self._target = target
+        self.target_path.setText(target.path or target.label or target.target_id)
+        self.target_meta.setText(
+            f"Whole-device capacity: {self._format_capacity(target.capacity_bytes)}"
+        )
+
+        meta = target.metadata if isinstance(target.metadata, dict) else {}
+        complete = bool(meta.get("protection_discovery_complete", False))
+        reason = str(
+            meta.get("block_reason") or "No specific blocker supplied by inventory."
+        )
+
+        self.physical_device_status.setText(
+            f"Selected: {meta.get('model') or target.label}\n"
+            f"Stable identity: {target.target_id}\n"
+            f"Protection discovery: {'COMPLETE' if complete else 'INCOMPLETE'}\n"
+            f"Inventory reason: {reason}"
+        )
+        self.status_line.setText(
+            "Physical device selected. Inspect it to request a fresh native plan."
+        )
         self._update_actions()
 
     def _choose_target(self):
@@ -450,21 +603,28 @@ class SanitizationPage(QWidget):
                 path=str(Path(path).resolve()),
             )
         elif descriptor.get("selector") == "device":
-            try:
-                targets = self.engine.list_targets(kind)
-            except Exception as error:
-                self.status_line.setText(f"Unable to enumerate targets: {error}")
-                return
-            if not targets:
-                QMessageBox.information(self, "No targets", "The backend did not report any eligible targets.")
-                return
-            labels = [f"{item.label} — {self._format_capacity(item.capacity_bytes)}" for item in targets]
-            chosen, accepted = QInputDialog.getItem(self, "Select target device", "Target", labels, 0, False)
-            if not accepted:
-                return
-            self._target = targets[labels.index(chosen)]
-        else:
-            return
+            # The physical-device dropdown is the source of selection.
+            # _on_physical_device_selected() sets self._target.
+            target = self._target
+
+            if target is None or target.kind != kind:
+                index = self.physical_device_combo.currentIndex()
+                targets = getattr(self, "_physical_targets", [])
+
+                if index < 0 or index >= len(targets):
+                    self.status_line.setText(
+                        f"Selection diagnostic: combo_count="
+                        f"{self.physical_device_combo.count()}, "
+                        f"combo_index={index}, "
+                        f"cached_targets={len(targets)}, "
+                        f"current_target_type="
+                        f"{type(self._target).__name__}"
+                    )
+                    return
+
+                target = targets[index]
+
+            self._target = target
 
         self._discard_plan()
         self.target_path.setText(self._target.path or self._target.label or self._target.target_id)
@@ -473,11 +633,84 @@ class SanitizationPage(QWidget):
         self.result_view.setPlainText("No operation performed for this target.")
         self._update_actions()
 
+    def _use_selected_evidence_device(self):
+        """Load the shared sidebar/Evidence selection as a read-only candidate.
+
+        Evidence selections are mounted-volume paths, not proven physical-disk
+        identities. This path intentionally never creates an executable plan.
+        """
+        if self._busy():
+            return
+        device = self.main_window.device_manager.get_selected_device()
+        if not isinstance(device, dict) or not device.get("path"):
+            QMessageBox.information(
+                self,
+                "No evidence device selected",
+                "Select a mounted device in the sidebar or Evidence page first.",
+            )
+            return
+
+        self._discard_plan()
+        self._target = SanitizationTarget(
+            kind="mounted_volume_inspection",
+            target_id=str(device.get("path", "")),
+            label=str(device.get("name", "Selected evidence volume")),
+            selector="device",
+            path=str(device.get("path", "")),
+            capacity_bytes=int(device.get("capacity_bytes", 0) or 0),
+            metadata=dict(device),
+        )
+        self.target_path.setText(
+            f"{self._target.label}\n{self._target.path}"
+        )
+        capacity = self._target.capacity_bytes
+        if capacity <= 0:
+            capacity_text = str(device.get("capacity", "Unknown capacity"))
+        else:
+            capacity_text = self._format_capacity(capacity)
+        self.target_meta.setText(f"Mounted evidence volume: {capacity_text}")
+        self.target_description.setText(
+            "Evidence selection is a mounted volume, not a verified whole physical disk. "
+            "To sanitize a USB, switch Target type to Physical USB / storage device and select "
+            "the exact whole disk from the refreshed native inventory."
+        )
+        self.plan_badge.setText("INSPECTION ONLY")
+        self.plan_badge.setStyleSheet(self._badge_style(False))
+        self.plan_target.setText(f"{self._target.label} — candidate")
+        self.plan_summary.setText(
+            "No sanitization plan was created. This is the globally selected evidence volume, "
+            "not a verified physical-device target."
+        )
+        self.steps_view.setPlainText(
+            "1. Read selected volume metadata [not performed here]\n"
+            "2. Mounted-volume to physical-disk mapping is not inferred from this selection\n"
+            "3. For a physical target, use the dedicated whole-device selector and native planner\n"
+            "4. Destructive execution [DISABLED for this mounted-volume candidate]"
+        )
+        self.warnings_view.setPlainText(
+            "BLOCKER: The selected evidence path does not establish the underlying physical disk.\n"
+            "BLOCKER: This candidate is a mounted volume, not a verified whole physical disk.\n"
+            "BLOCKER: Select the physical-device target type to request native inventory and preflight."
+        )
+        self.execute_button.setEnabled(False)
+        self.result_view.setPlainText("No operation performed. Candidate selected; execution is not available from this selection.")
+        self.status_line.setText(
+            "Shared Evidence selection loaded. No device was opened for writing; execution remains disabled."
+        )
+        self._update_actions()
+
     def _inspect_target(self):
         if self._busy():
             return
         if self._target is None:
             self.status_line.setText("Select a target before building a plan.")
+            return
+        if self._target.kind == "mounted_volume_inspection":
+            self.status_line.setText(
+                "This mounted-volume candidate is inspection-only. Switch Target type to "
+                "Physical USB / storage device, refresh inventory, and select the whole disk."
+            )
+            self.execute_button.setEnabled(False)
             return
         method = self._selected_descriptor(self.method_combo)
         if not method or not method.get("enabled", False):
@@ -489,7 +722,7 @@ class SanitizationPage(QWidget):
         self.progress.setValue(0)
         self.progress.setFormat("Inspecting target…")
         self.inspect_button.setEnabled(False)
-        self.status_line.setText("Building a read-only sanitization plan…")
+        self.status_line.setText("Building a sanitization plan…")
         try:
             self._plan = self.engine.plan_target(self._target, str(method.get("id", "")))
         except Exception as error:
@@ -545,8 +778,8 @@ class SanitizationPage(QWidget):
         self.method_combo.setEnabled(False)
         self.clear_button.setEnabled(False)
         self.progress.setRange(0, 0)
-        self.progress.setFormat("Executing and validating…")
-        self.status_line.setText("The backend is executing the authorized plan. Do not disconnect the target.")
+        self.progress.setFormat("Executing (native byte progress unavailable)…")
+        self.status_line.setText("The backend is executing the authorized plan. Byte-level progress is not exposed by the current native API. Do not disconnect the target.")
         self._worker = _ExecutionWorker(self.engine, plan, dialog.authorization(), self)
         self._worker.completed.connect(self._on_execution_completed)
         self._worker.failed.connect(self._on_execution_failed)
@@ -650,15 +883,53 @@ class SanitizationPage(QWidget):
         self.target_button.setEnabled(
             not busy and bool(descriptor.get("enabled", False))
         )
+        if hasattr(self, "refresh_physical_button"):
+            self.refresh_physical_button.setEnabled(
+                not busy and descriptor.get("selector") == "device"
+            )
+        if hasattr(self, "selected_device_button"):
+            self.selected_device_button.setEnabled(
+                not busy and self.main_window.device_manager.get_selected_device() is not None
+            )
 
     def _busy(self) -> bool:
         return self._worker is not None and self._worker.isRunning()
 
     def refresh_device_context(self):
-        # Intentionally independent of the selected evidence device. Sanitization
-        # targets are chosen through sanitization capabilities, never inferred from
-        # the globally selected forensic evidence source.
-        pass
+        # Reflect the shared sidebar/Evidence selection, but never treat a mounted
+        # volume path as authorization to erase its underlying physical device.
+        device = self.main_window.device_manager.get_selected_device()
+        if not isinstance(device, dict):
+            self.selected_device_context.setText("Evidence selection: none")
+            self.selected_device_button.setEnabled(not self._busy())
+            return
+        name = str(device.get("name", "Selected evidence volume"))
+        path = str(device.get("path", "Unknown path"))
+        capacity = str(device.get("capacity", "Unknown capacity"))
+        self.selected_device_context.setText(
+            f"Evidence selection: {name} | {capacity}\n{path}"
+        )
+        self.selected_device_button.setEnabled(not self._busy())
+        # If the shared selection changes after loading a candidate, discard it so
+        # the page cannot continue showing a stale target.
+        if (
+            self._target is not None
+            and self._target.kind == "mounted_volume_inspection"
+            and self._target.path != path
+        ):
+            self._discard_plan()
+            self._target = None
+            self.target_path.setText("No target selected")
+            self.target_meta.setText("Target size: —")
+            self.plan_badge.setText("NO PLAN")
+            self.plan_target.setText("Select a target and inspect it to create a plan.")
+            self.plan_summary.setText("Evidence selection changed; previous candidate cleared.")
+            self.steps_view.clear()
+            self.warnings_view.clear()
+            self.status_line.setText(
+                "Evidence selection changed. Load the current selection again if needed."
+            )
+        self._update_actions()
 
     def closeEvent(self, event):
         if self._busy():

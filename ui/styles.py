@@ -1,17 +1,17 @@
-WINDOW_BG = "#121517"
-PANEL_BG = "#171c1f"
-PANEL_ALT = "#1a2025"
-SURFACE = "#1d2429"
-SURFACE_LIGHT = "#222b31"
-BORDER = "#2b363d"
-TEXT = "#edf1ef"
-TEXT_MUTED = "#9aa5a1"
-ACCENT = "#829b92"
-ACCENT_SOFT = "#9db2a9"
-TERRACOTTA = "#b66a5d"
-SUCCESS = "#7db88a"
-WARNING = "#d5b36a"
-DANGER = "#d77c69"
+WINDOW_BG = "#111113"
+PANEL_BG = "#19191d"
+PANEL_ALT = "#202025"
+SURFACE = "#26262c"
+SURFACE_LIGHT = "#303038"
+BORDER = "#414149"
+TEXT = "#f5f5f7"
+TEXT_MUTED = "#b4b4bf"
+ACCENT = "#e04b54"
+ACCENT_SOFT = "#ff777e"
+TERRACOTTA = "#c93440"
+SUCCESS = "#8bd5a4"
+WARNING = "#f1c777"
+DANGER = "#ff6b75"
 
 APP_STYLESHEET = f"""
 QMainWindow {{
@@ -22,7 +22,8 @@ QMainWindow {{
 QWidget {{
     background: transparent;
     color: {TEXT};
-    font-family: 'Segoe UI';
+    font-family: 'Segoe UI', 'Inter', sans-serif;
+    font-size: 12px;
 }}
 
 QLabel {{
@@ -33,8 +34,9 @@ QPushButton {{
     background: {SURFACE};
     border: 1px solid {BORDER};
     color: {TEXT};
-    padding: 7px 12px;
-    min-height: 30px;
+    padding: 8px 14px;
+    min-height: 34px;
+    border-radius: 3px;
     font-weight: 600;
 }}
 
@@ -186,7 +188,7 @@ QLabel#workspaceTitle {{ font-size: 23px; font-weight: 600; color: #f1f5f3; }}
 QLabel#workspaceSubtitle, QLabel#muted {{ color: #95a5a8; font-size: 12px; }}
 QLabel#panelEyebrow {{ color: #9aabaa; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; }}
 QLabel#previewName {{ font-size: 13px; font-weight: 600; }}
-QLabel#statusLine {{ color: #70d7ce; font-size: 11px; }}
+QLabel#statusLine {{ color: #ff777e; font-size: 11px; }}
 QLabel#metadataKey {{ color: #97a5a7; font-size: 11px; }}
 QLabel#metadataValue {{ color: #e3ebea; font-size: 11px; }}
 QLabel#paperPreview {{
@@ -212,7 +214,7 @@ QLineEdit {{
     border: 1px solid #34434a;
     padding: 7px 10px;
 }}
-QLineEdit:focus {{ border-color: #42cfc8; }}
+QLineEdit:focus {{ border-color: {ACCENT}; }}
 QTableWidget {{
     background: #121a1e;
     alternate-background-color: #172126;
@@ -224,7 +226,7 @@ QTableWidget::item {{ padding: 7px 8px; border-bottom: 1px solid #223036; }}
 QTableWidget::item:selected {{ background: #19353d; color: #f2ffff; }}
 QTabWidget::pane {{ border: 1px solid #2c3a40; background: #11191d; }}
 QTabBar::tab {{ background: #151f24; color: #aebdbc; border: none; padding: 8px 13px; }}
-QTabBar::tab:selected {{ color: #55ddd5; border-bottom: 2px solid #45d8d0; background: #17242a; }}
+QTabBar::tab:selected {{ color: #ff777e; border-bottom: 2px solid #e04b54; background: #17242a; }}
 QTextEdit#hexView {{
     background: #10181c;
     border: none;

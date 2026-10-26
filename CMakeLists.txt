@@ -84,6 +84,10 @@ target_include_directories(crypty_platform
         "${CMAKE_CURRENT_SOURCE_DIR}/core"
 )
 
+if(WIN32)
+    target_link_libraries(crypty_platform PRIVATE advapi32)
+endif()
+
 # --------------------------------------------------
 # Data sanitization
 # --------------------------------------------------
@@ -91,6 +95,7 @@ target_include_directories(crypty_platform
 add_library(crypty_sanitization STATIC
     core/sanitization/policy_engine.cpp
     core/sanitization/sanitization_engine.cpp
+    core/sanitization/execution/device_native_executor.cpp
     core/sanitization/preflight.cpp
 )
 

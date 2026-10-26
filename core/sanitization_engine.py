@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 CONFIRMATION_PHRASE = "OVERWRITE THIS FILE"
+PHYSICAL_DEVICE_CONFIRMATION_PHRASE = "SANITIZE THIS PHYSICAL DEVICE"
 
 _PLAN_STATUS_NAMES = {
     0: "Ready",
@@ -80,49 +81,92 @@ class SanitizationEngine:
         self.backend = backend
 
     def capabilities(self) -> dict[str, Any]:
-        """Return capability descriptors; unavailable future targets stay visible but disabled."""
+        """Merge backend capabilities with the physical-device workflow contract.
+
+        Some backends return only image-file capabilities. Do not let that partial
+        response silently hide the physical-device selector from the UI; advertise it
+        as disabled when the required provider methods are missing.
+        """
         provider = getattr(self.backend, "sanitization_capabilities", None)
-        if callable(provider):
-            supplied = provider()
-            if isinstance(supplied, dict) and supplied.get("targets"):
-                return supplied
+        supplied = provider() if callable(provider) else {}
+        supplied = supplied if isinstance(supplied, dict) else {}
+
+        targets = [dict(item) for item in supplied.get("targets", []) if isinstance(item, dict)]
+        methods = [dict(item) for item in supplied.get("methods", []) if isinstance(item, dict)]
+
+        # Always expose the physical-device choice. Eligibility remains a per-device
+        # decision made by the native planner, never by the UI capability list.
+        physical_enabled = all(callable(getattr(self.backend, name, None)) for name in (
+            "list_sanitization_targets",
+            "create_sanitization_plan_for_target",
+            "execute_sanitization_plan_for_target",
+        ))
+        physical_target = {
+            "kind": "physical_device",
+            "label": "Physical USB / storage device",
+            "selector": "device",
+            "enabled": physical_enabled,
+            "description": (
+                "Select a whole physical disk, not a mounted drive letter. Crypty refreshes its "
+                "identity and asks the native planner to check protection before authorization."
+                if physical_enabled else
+                "Physical-device execution is unavailable because this backend lacks required native methods."
+            ),
+        }
+        target_index = next((i for i, item in enumerate(targets)
+                             if item.get("kind") == "physical_device"), None)
+        if target_index is None:
+            targets.append(physical_target)
+        else:
+            # Preserve backend-specific metadata while ensuring the selector contract
+            # and enablement cannot be accidentally omitted.
+            targets[target_index] = {**physical_target, **targets[target_index]}
+            targets[target_index]["enabled"] = physical_enabled and bool(targets[target_index].get("enabled", True))
+
+        physical_method = {
+            "id": "physical_device_zero_overwrite",
+            "label": "Physical-device zero overwrite + read-back verification",
+            "enabled": physical_enabled,
+            "assurance": "Clear",
+            "description": "Whole-device overwrite with read-back verification; not proof of flash-cell purge.",
+        }
+        method_index = next((i for i, item in enumerate(methods)
+                             if item.get("id") == "physical_device_zero_overwrite"), None)
+        if method_index is None:
+            methods.append(physical_method)
+        else:
+            methods[method_index] = {**physical_method, **methods[method_index]}
+            methods[method_index]["enabled"] = physical_enabled and bool(methods[method_index].get("enabled", True))
+
+        # Retain a safe image-file fallback if the backend returned no capabilities.
+        if not any(item.get("kind") == "disk_image_file" for item in targets):
+            targets.insert(0, {
+                "kind": "disk_image_file", "label": "Disposable image file",
+                "selector": "file", "enabled": True,
+                "description": "Overwrite a Crypty-marked disposable image file and verify it by read-back.",
+            })
+        if not any(item.get("id") == "image_file_zero_overwrite" for item in methods):
+            methods.insert(0, {
+                "id": "image_file_zero_overwrite", "label": "Zero overwrite + read-back verification",
+                "enabled": True, "assurance": "Clear",
+                "description": "Available for eligible disposable image files.",
+            })
+
+        limitations = [str(item) for item in supplied.get("limitations", [])]
+        for limitation in (
+            "Physical-device execution remains blocked unless native host-storage protection discovery is complete.",
+            "Zero overwrite and read-back do not prove erasure of remapped flash cells or controller-reserved areas.",
+            "Use only a disposable device whose contents may be permanently destroyed.",
+        ):
+            if limitation not in limitations:
+                limitations.append(limitation)
 
         return {
-            "targets": [
-                {
-                    "kind": "disk_image_file",
-                    "label": "Disposable image file",
-                    "selector": "file",
-                    "enabled": True,
-                    "description": (
-                        "Overwrite a Crypty-marked disposable image file and verify it by read-back."
-                    ),
-                },
-                {
-                    "kind": "physical_device",
-                    "label": "Physical device",
-                    "selector": "device",
-                    "enabled": False,
-                    "description": (
-                        "Unavailable until mounted-volume, boot-critical-volume and device-safety "
-                        "preflight checks are implemented and validated."
-                    ),
-                },
-            ],
-            "methods": [
-                {
-                    "id": "image_file_zero_overwrite",
-                    "label": "Zero overwrite + read-back verification",
-                    "enabled": True,
-                    "assurance": "Clear",
-                    "description": "Supported only for eligible disposable image files.",
-                }
-            ],
-            "execution_enabled": True,
-            "limitations": [
-                "Physical-device sanitization is not enabled.",
-                "File overwrite does not establish physical-media sanitization assurance.",
-            ],
+            **supplied,
+            "targets": targets,
+            "methods": methods,
+            "execution_enabled": bool(supplied.get("execution_enabled", True)),
+            "limitations": limitations,
         }
 
     def list_targets(self, target_kind: str) -> list[SanitizationTarget]:
@@ -254,7 +298,14 @@ class SanitizationEngine:
             assurance_label=str(raw.get("assurance_label", "Clear")),
             steps=steps,
             warnings=list(dict.fromkeys(warnings)),
-            confirmation_phrase=str(raw.get("confirmation_phrase", CONFIRMATION_PHRASE)),
+            confirmation_phrase=str(
+                raw.get(
+                    "confirmation_phrase",
+                    PHYSICAL_DEVICE_CONFIRMATION_PHRASE
+                    if target.kind == "physical_device"
+                    else CONFIRMATION_PHRASE,
+                )
+            ),
             metadata=dict(raw.get("metadata", {})),
         )
 

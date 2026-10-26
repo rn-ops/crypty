@@ -214,10 +214,198 @@ struct BootCriticalDiskDiscovery {
     std::set<DWORD> protected_disk_numbers;
 };
 
-// Conservative partition-level detection. This recognizes GPT EFI System and
-// Windows Recovery partitions, plus active MBR partitions. It is not a full
-// boot-dependency audit (for example, pagefile/crash-dump locations are not
-// covered here), so it must never authorize physical sanitization by itself.
+struct HostDependencyDiscovery {
+    bool complete = false;
+    std::set<DWORD> protected_disk_numbers;
+    std::vector<std::string> diagnostics;
+};
+
+bool query_registry_string_value(HKEY key, const wchar_t* name,
+                                 std::vector<std::wstring>& values) {
+    DWORD type = 0;
+    DWORD bytes = 0;
+    LONG status = RegQueryValueExW(key, name, nullptr, &type, nullptr, &bytes);
+    if (status == ERROR_FILE_NOT_FOUND) return true; // optional value
+    if (status != ERROR_SUCCESS || bytes == 0 || bytes > 1024 * 1024) return false;
+    if (type != REG_SZ && type != REG_EXPAND_SZ && type != REG_MULTI_SZ) return false;
+    std::vector<wchar_t> buffer(bytes / sizeof(wchar_t) + 2, L'\0');
+    status = RegQueryValueExW(key, name, nullptr, &type,
+        reinterpret_cast<BYTE*>(buffer.data()), &bytes);
+    if (status != ERROR_SUCCESS) return false;
+
+    if (type == REG_MULTI_SZ) {
+        for (const wchar_t* current = buffer.data(); *current != L'\0';
+             current += std::wcslen(current) + 1) {
+            values.emplace_back(current);
+        }
+    } else {
+        std::wstring value(buffer.data());
+        if (type == REG_EXPAND_SZ && !value.empty()) {
+            DWORD needed = ExpandEnvironmentStringsW(value.c_str(), nullptr, 0);
+            if (needed == 0 || needed > 32768) return false;
+            std::vector<wchar_t> expanded(needed, L'\0');
+            if (ExpandEnvironmentStringsW(value.c_str(), expanded.data(), needed) == 0) return false;
+            value = expanded.data();
+        }
+        if (!value.empty()) values.push_back(std::move(value));
+    }
+    return true;
+}
+
+bool disk_numbers_for_file_path(std::wstring path, std::set<DWORD>& disks) {
+    if (path.empty()) return true;
+    // Windows stores page-file and dump paths in several equivalent forms.
+    if (path.rfind(L"\\??\\", 0) == 0) path.erase(0, 4);
+    if (path.rfind(L"\\SystemRoot\\", 0) == 0) {
+        wchar_t windows_directory[MAX_PATH + 1]{};
+        UINT length = GetWindowsDirectoryW(windows_directory,
+            static_cast<UINT>(std::size(windows_directory)));
+        if (length == 0 || length >= std::size(windows_directory)) return false;
+        path = std::wstring(windows_directory) + path.substr(11);
+    }
+    // Pagefile configuration can append size arguments after the path.
+    const std::size_t comma = path.find(L',');
+    if (comma != std::wstring::npos) path.resize(comma);
+    const std::size_t sys_suffix = path.find(L".sys");
+    if (sys_suffix != std::wstring::npos) path.resize(sys_suffix + 4);
+
+    // Native volume paths (especially SYSTEM\Setup\SystemPartition) often
+    // refer to an unmounted volume such as \Device\HarddiskVolume1. Such a
+    // volume has no drive-letter mapping, so try opening the volume device
+    // directly and query its extents before attempting DOS-drive translation.
+    if (path.rfind(L"\\Device\\HarddiskVolume", 0) == 0) {
+        const std::wstring native_name = path.substr(std::wstring(L"\\Device\\").size());
+        if (native_name.find_first_of(L"\\/") == std::wstring::npos) {
+            const std::wstring volume_device = L"\\.\\" + native_name;
+            Handle native_volume(CreateFileW(volume_device.c_str(), 0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr, OPEN_EXISTING, 0, nullptr));
+            if (native_volume.valid()) {
+                std::vector<unsigned char> extent_buffer(64 * 1024);
+                DWORD extent_bytes = 0;
+                if (DeviceIoControl(native_volume.get(), IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                        nullptr, 0, extent_buffer.data(),
+                        static_cast<DWORD>(extent_buffer.size()), &extent_bytes, nullptr) &&
+                    extent_bytes >= sizeof(VOLUME_DISK_EXTENTS)) {
+                    const auto* extents = reinterpret_cast<const VOLUME_DISK_EXTENTS*>(extent_buffer.data());
+                    const std::size_t extent_required = offsetof(VOLUME_DISK_EXTENTS, Extents) +
+                        static_cast<std::size_t>(extents->NumberOfDiskExtents) * sizeof(DISK_EXTENT);
+                    if (extents->NumberOfDiskExtents != 0 && extent_required <= extent_bytes) {
+                        for (DWORD i = 0; i < extents->NumberOfDiskExtents; ++i)
+                            disks.insert(extents->Extents[i].DiskNumber);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // ExistingPageFiles is commonly reported as a native device path rather
+    // than a drive-letter path. Translate it through DOS-device mappings.
+    if (path.rfind(L"\\Device\\", 0) == 0) {
+        bool translated = false;
+        for (wchar_t drive = L'A'; drive <= L'Z'; ++drive) {
+            wchar_t drive_name[] = {drive, L':', L'\0'};
+            std::vector<wchar_t> target(32768, L'\0');
+            const DWORD count = QueryDosDeviceW(drive_name, target.data(),
+                static_cast<DWORD>(target.size()));
+            if (count == 0) continue;
+            const std::wstring device_target(target.data());
+            if (path.size() >= device_target.size() &&
+                _wcsnicmp(path.c_str(), device_target.c_str(), device_target.size()) == 0 &&
+                (path.size() == device_target.size() || path[device_target.size()] == L'\\')) {
+                const std::wstring suffix = path.substr(device_target.size());
+                path = std::wstring(1, drive) + L":" +
+                    (suffix.empty() ? std::wstring(L"\\") : suffix);
+                translated = true;
+                break;
+            }
+        }
+        if (!translated) return false;
+    }
+    while (!path.empty() && (path.front() == L' ' || path.front() == L'\t')) path.erase(path.begin());
+    while (!path.empty() && (path.back() == L' ' || path.back() == L'\t')) path.pop_back();
+    if (path.empty()) return true;
+
+    std::vector<wchar_t> root(32768, L'\0');
+    if (!GetVolumePathNameW(path.c_str(), root.data(), static_cast<DWORD>(root.size()))) {
+        // A registry path can refer to a non-mounted device. We cannot prove its
+        // disk membership, so the caller must keep discovery incomplete.
+        return false;
+    }
+    std::wstring volume_path = L"\\\\.\\";
+    if (root[0] && root[1] == L':') {
+        volume_path.push_back(root[0]);
+        volume_path.push_back(L':');
+    } else {
+        // Volume-GUID mount roots need the trailing slash removed for CreateFile.
+        volume_path = root.data();
+        while (!volume_path.empty() && volume_path.back() == L'\\') volume_path.pop_back();
+    }
+    Handle volume(CreateFileW(volume_path.c_str(), 0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, 0, nullptr));
+    if (!volume.valid()) return false;
+    std::vector<unsigned char> buffer(64 * 1024);
+    DWORD returned = 0;
+    if (!DeviceIoControl(volume.get(), IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+            nullptr, 0, buffer.data(), static_cast<DWORD>(buffer.size()), &returned, nullptr) ||
+        returned < sizeof(VOLUME_DISK_EXTENTS)) return false;
+    const auto* extents = reinterpret_cast<const VOLUME_DISK_EXTENTS*>(buffer.data());
+    const std::size_t required = offsetof(VOLUME_DISK_EXTENTS, Extents) +
+        static_cast<std::size_t>(extents->NumberOfDiskExtents) * sizeof(DISK_EXTENT);
+    if (required > returned || extents->NumberOfDiskExtents == 0) return false;
+    for (DWORD i = 0; i < extents->NumberOfDiskExtents; ++i)
+        disks.insert(extents->Extents[i].DiskNumber);
+    return true;
+}
+
+HostDependencyDiscovery discover_host_storage_dependencies() {
+    HostDependencyDiscovery result;
+    bool complete = true;
+    HKEY memory_key = nullptr;
+    LONG status = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management",
+        0, KEY_QUERY_VALUE, &memory_key);
+    if (status != ERROR_SUCCESS) {
+        result.diagnostics.emplace_back("Could not read Windows paging-file configuration.");
+        return result;
+    }
+    std::vector<std::wstring> pagefiles;
+    if (!query_registry_string_value(memory_key, L"PagingFiles", pagefiles) ||
+        !query_registry_string_value(memory_key, L"ExistingPageFiles", pagefiles)) complete = false;
+    RegCloseKey(memory_key);
+
+    HKEY crash_key = nullptr;
+    status = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Control\\CrashControl",
+        0, KEY_QUERY_VALUE, &crash_key);
+    if (status != ERROR_SUCCESS) {
+        complete = false;
+        result.diagnostics.emplace_back("Could not read Windows crash-dump configuration.");
+    } else {
+        if (!query_registry_string_value(crash_key, L"DumpFile", pagefiles) ||
+            !query_registry_string_value(crash_key, L"DedicatedDumpFile", pagefiles) ||
+            !query_registry_string_value(crash_key, L"MinidumpDir", pagefiles)) complete = false;
+        RegCloseKey(crash_key);
+    }
+
+    for (const auto& configured_path : pagefiles) {
+        if (!disk_numbers_for_file_path(configured_path, result.protected_disk_numbers)) {
+            complete = false;
+            result.diagnostics.emplace_back("Could not map a configured paging or crash-dump path to a physical disk.");
+        }
+    }
+    // hiberfil.sys resides on the Windows directory volume, which is already
+    // mapped by find_windows_directory_disks(). Hibernation configuration itself
+    // does not move this file to another volume.
+    result.complete = complete;
+    return result;
+}
+
+// Conservative partition-level detection for EFI System and Windows Recovery
+// partitions. Active MBR flags are not treated as proof that Windows boots from
+// a disk; current host dependencies are mapped separately.
 BootCriticalDiskDiscovery discover_boot_critical_disks() {
     BootCriticalDiskDiscovery result;
     bool all_queries_succeeded = true;
@@ -228,6 +416,27 @@ BootCriticalDiskDiscovery discover_boot_critical_disks() {
     const GUID kMicrosoftRecoveryPartition = {
         0xDE94BBA4, 0x06D1, 0x4D40, {0xA1, 0x6A, 0xBF, 0xD5, 0x01, 0x79, 0xD6, 0xAC}
     };
+
+    // Windows records the active system partition as a native device path.
+    // Resolve it explicitly so a separate BIOS/MBR boot disk is still protected
+    // without treating every removable disk's active flag as host-critical.
+    HKEY setup_key = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\Setup", 0,
+            KEY_QUERY_VALUE, &setup_key) != ERROR_SUCCESS) {
+        all_queries_succeeded = false;
+    } else {
+        std::vector<std::wstring> system_partition_values;
+        if (!query_registry_string_value(setup_key, L"SystemPartition", system_partition_values) ||
+            system_partition_values.empty()) {
+            all_queries_succeeded = false;
+        } else {
+            for (const auto& system_partition : system_partition_values) {
+                if (!disk_numbers_for_file_path(system_partition, result.protected_disk_numbers))
+                    all_queries_succeeded = false;
+            }
+        }
+        RegCloseKey(setup_key);
+    }
 
     for (unsigned index = 0; index < kMaximumPhysicalDriveIndex; ++index) {
         const std::wstring path = physical_path(index);
@@ -271,10 +480,10 @@ BootCriticalDiskDiscovery discover_boot_critical_disks() {
                 critical = true;
                 break;
             }
-            if (partition.PartitionStyle == PARTITION_STYLE_MBR && partition.Mbr.BootIndicator) {
-                critical = true;
-                break;
-            }
+            // An active MBR flag only means a partition is marked bootable; it
+            // does not prove that the running Windows installation boots from it.
+            // Actual Windows and configured host-storage dependencies are mapped
+            // separately below, avoiding false positives on ordinary USB media.
         }
         if (critical) result.protected_disk_numbers.insert(index);
     }
@@ -382,6 +591,9 @@ DeviceInventoryResult enumerate_physical_devices() {
     const auto system_disks = find_windows_directory_disks();
     const auto protected_volumes = discover_protected_volumes();
     const auto boot_critical_disks = discover_boot_critical_disks();
+    const auto host_dependencies = discover_host_storage_dependencies();
+    const bool protection_discovery_complete = system_disks.known &&
+        protected_volumes.complete && boot_critical_disks.complete && host_dependencies.complete;
     bool partial = false;
     constexpr unsigned kMaximumPhysicalDriveIndex = 128;
 
@@ -423,9 +635,7 @@ DeviceInventoryResult enumerate_physical_devices() {
         device.logical_sector_size = geometry.Geometry.BytesPerSector;
         device.os_volume_membership_known = system_disks.known;
         device.contains_os_volume = system_disks.known && system_disks.numbers.count(index) != 0;
-        // Full host-storage dependency discovery is intentionally incomplete
-        // until paging, crash-dump, hibernation, and other dependencies are audited.
-        device.protection_discovery_complete = false;
+        device.protection_discovery_complete = protection_discovery_complete;
         for (const auto& entry : protected_volumes.mounted_paths_by_disk) {
             if (entry.first == index && !entry.second.empty()) {
                 device.mounted_volume_paths.push_back(entry.second);
@@ -433,7 +643,8 @@ DeviceInventoryResult enumerate_physical_devices() {
         }
         if (device.contains_os_volume ||
             protected_volumes.protected_disk_numbers.count(index) != 0 ||
-            boot_critical_disks.protected_disk_numbers.count(index) != 0) {
+            boot_critical_disks.protected_disk_numbers.count(index) != 0 ||
+            host_dependencies.protected_disk_numbers.count(index) != 0) {
             device.protection_status = DeviceProtectionStatus::Protected;
             if (device.contains_os_volume) {
                 device.protection_reasons.emplace_back("Hosts the Windows directory volume.");
@@ -442,16 +653,19 @@ DeviceInventoryResult enumerate_physical_devices() {
                 device.protection_reasons.emplace_back("Hosts the volume containing the running Crypty executable.");
             }
             if (boot_critical_disks.protected_disk_numbers.count(index) != 0) {
-                device.protection_reasons.emplace_back("Contains an EFI System, Windows Recovery, or active MBR boot partition.");
+                device.protection_reasons.emplace_back("Contains an EFI System or Windows Recovery partition.");
             }
-            if (!protected_volumes.complete || !boot_critical_disks.complete) {
+            if (host_dependencies.protected_disk_numbers.count(index) != 0) {
+                device.protection_reasons.emplace_back("Hosts a configured Windows paging or crash-dump file.");
+            }
+            if (!protection_discovery_complete) {
                 device.protection_reasons.emplace_back("Additional host-storage dependencies could not all be checked.");
             }
+        } else if (device.protection_discovery_complete) {
+            device.protection_status = DeviceProtectionStatus::Eligible;
         } else {
-            // Do not mark a disk Eligible here: boot, EFI, recovery, paging, crash
-            // dump, and other host dependencies still require a complete audit.
             device.protection_status = DeviceProtectionStatus::Unknown;
-            device.protection_reasons.emplace_back("Boot-critical and other host-storage dependencies are not fully classified.");
+            device.protection_reasons.emplace_back("Host-storage dependency discovery is incomplete; physical sanitization remains blocked.");
         }
         bool metadata_complete = true;
         query_storage_descriptor(handle.get(), device, metadata_complete);
@@ -541,10 +755,19 @@ DeviceInventoryResult enumerate_physical_devices() {
         result.devices.push_back(std::move(device));
     }
 
-    if (!system_disks.known || !protected_volumes.complete || !boot_critical_disks.complete) partial = true;
+    if (!protection_discovery_complete) partial = true;
     if (partial) {
         result.status = DeviceInventoryStatus::Partial;
-        result.diagnostic = "Inventory is partial: one or more devices or metadata fields could not be queried. EFI/active/recovery partitions are conservatively protected when detected, but paging, crash-dump, hibernation, and other host-storage dependencies remain unaudited; do not treat this inventory as sanitization authorization.";
+        result.diagnostic = "Inventory is partial: host-storage dependency discovery or device metadata could not be completed. Physical-device sanitization remains blocked until the inventory reports complete protection discovery.";
+        for (const auto& diagnostic : host_dependencies.diagnostics) {
+            result.diagnostic += " Detail: " + diagnostic;
+        }
+        if (!system_disks.known)
+            result.diagnostic += " Detail: Could not map the Windows directory volume to physical disk extents.";
+        if (!protected_volumes.complete)
+            result.diagnostic += " Detail: One or more mounted-volume dependency queries failed.";
+        if (!boot_critical_disks.complete)
+            result.diagnostic += " Detail: Boot-critical partition/system-partition discovery was incomplete.";
     }
     return result;
 }

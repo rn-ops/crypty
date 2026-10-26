@@ -1,4 +1,5 @@
 #include "sanitization_engine.hpp"
+#include "execution/device_native_executor.hpp"
 
 #include <algorithm>
 #include <array>
@@ -215,8 +216,20 @@ namespace crypty::sanitization {
         return false;
       }
 
+      if (plan.target_kind == TargetKind::PhysicalDevice) {
+        if (plan.target_path.empty() || plan.device_id.empty() || plan.target_capacity_bytes == 0) {
+          reason = "Physical-device identity and capacity are required.";
+          return false;
+        }
+        if (plan.required_level != AssuranceLevel::Clear || plan.steps.size() != 1 ||
+            plan.steps.front().method != Method::Overwrite) {
+          reason = "Physical-device overwrite supports only a single Clear-level Overwrite step.";
+          return false;
+        }
+        return true;
+      }
       if (plan.target_kind != TargetKind::DiskImageFile) {
-        reason = "Only explicitly identified disk-image files are supported.";
+        reason = "Unsupported sanitization target kind.";
         return false;
       }
 
@@ -280,8 +293,9 @@ namespace crypty::sanitization {
       );
     }
 
-    if (authorization.confirmation_phrase !=
-      kSanitizationConfirmationPhrase) {
+    const char* required_phrase = plan.target_kind == TargetKind::PhysicalDevice
+      ? "SANITIZE THIS PHYSICAL DEVICE" : kSanitizationConfirmationPhrase;
+    if (authorization.confirmation_phrase != required_phrase) {
       return failure(
         plan,
         "CONFIRMATION_PHRASE_INVALID",
@@ -291,6 +305,10 @@ namespace crypty::sanitization {
 
     if (!valid_plan(plan, reason)) {
       return failure(plan, "INVALID_PLAN", reason);
+    }
+
+    if (plan.target_kind == TargetKind::PhysicalDevice) {
+      return execute_physical_device_overwrite(plan, authorization);
     }
 
     const std::filesystem::path path = std::filesystem::u8path(plan.target_path);
